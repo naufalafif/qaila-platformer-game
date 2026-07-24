@@ -106,7 +106,7 @@ updateScale();
 
 function logicalHeight() { return canvas.height / scale; }
 
-const GRAVITY = 0.45; // slower/floatier fall, closer to classic platformer pacing (Mario/Ori)
+const GRAVITY = 0.28; // slow, floaty jump arc - easy to time stomps and jumps against enemies
 // GROUND_Y is a fixed proportion of the logical (world-unit) screen height, so the
 // ground always takes up the same small slice of the screen on any aspect ratio
 // (portrait phones included) instead of a fixed pixel value that could dominate a tall screen.
@@ -167,34 +167,42 @@ const sprites = {
   bush: loadImage('assets/bush.png'),
   flagPole: loadImage('assets/flag_pole.png'),
   flagBanner: loadImage('assets/flag_banner.png'),
-  player: [loadImage('assets/player_0.png'), loadImage('assets/player_1.png')],
   goomba: [loadImage('assets/enemy_goomba_0.png'), loadImage('assets/enemy_goomba_1.png')],
   turtle: [loadImage('assets/enemy_turtle_0.png'), loadImage('assets/enemy_turtle_1.png')],
 };
+// Player character (custom art, cropped/background-removed from assets/main-character.png source sheet)
+const charSprites = {
+  idle: loadImage('assets/character/idle.png'),
+  run: loadImage('assets/character/run.png'),
+  jump: loadImage('assets/character/jump.png'),
+  hurt: loadImage('assets/character/hurt.png'),
+  victory: loadImage('assets/character/victory.png'),
+};
+const CHAR_DISPLAY_HEIGHT = 42; // world-unit height the character is drawn at (bottom-anchored on the hitbox)
 const TILE = 30; // on-screen size for ground/block tiles
 
-// decorative trees & bushes along the level (purely visual, no collision)
+// decorative trees & bushes along the level (purely visual, no collision) -
+// each one kept well inside its platform's span so it never floats over a gap
 const decorations = [
-  { type: 'tree', x: 150 },  { type: 'bush', x: 260 },
-  { type: 'tree', x: 480 },  { type: 'tree', x: 640 },
-  { type: 'bush', x: 780 },  { type: 'tree', x: 900 },
-  { type: 'tree', x: 1080 }, { type: 'bush', x: 1200 },
-  { type: 'tree', x: 1340 }, { type: 'tree', x: 1500 },
-  { type: 'bush', x: 1700 }, { type: 'tree', x: 1900 },
-  { type: 'tree', x: 2050 }, { type: 'bush', x: 2200 },
-  { type: 'tree', x: 2350 },
+  { type: 'tree', x: 150 },  { type: 'bush', x: 260 },  { type: 'tree', x: 400 },
+  { type: 'tree', x: 640 },  { type: 'bush', x: 720 },
+  { type: 'tree', x: 950 },  { type: 'bush', x: 1030 },
+  { type: 'tree', x: 1250 }, { type: 'tree', x: 1400 }, { type: 'bush', x: 1550 },
+  { type: 'tree', x: 1850 }, { type: 'bush', x: 2000 }, { type: 'tree', x: 2150 }, { type: 'bush', x: 2300 },
 ];
 
 // ---- Level layout ----
-// platforms: static rectangles the player and enemies can stand on
+// platforms: static rectangles the player and enemies can stand on.
+// Gaps are 45 world-units wide; the jump physics below comfortably clear ~90+ units,
+// so gaps are crossable with generous timing margin instead of needing pixel-perfect jumps.
 const platforms = [
-  { x: 0,    y: GROUND_Y, w: 500,  h: GROUND_DEPTH },
-  { x: 560,  y: GROUND_Y, w: 300,  h: GROUND_DEPTH },
-  { x: 940,  y: GROUND_Y, w: 260,  h: GROUND_DEPTH },
-  { x: 620,  y: GROUND_Y - 100, w: 120, h: 20, deco: 'block' },
-  { x: 1260, y: GROUND_Y, w: 500,  h: GROUND_DEPTH },
-  { x: 1420, y: GROUND_Y - 80,  w: 100, h: 20, deco: 'block' },
-  { x: 1820, y: GROUND_Y, w: 700,  h: GROUND_DEPTH },
+  { x: 0,    y: GROUND_Y, w: 500, h: GROUND_DEPTH },
+  { x: 545,  y: GROUND_Y, w: 255, h: GROUND_DEPTH },
+  { x: 845,  y: GROUND_Y, w: 255, h: GROUND_DEPTH },
+  { x: 610,  y: GROUND_Y - 100, w: 120, h: 20, deco: 'block' },
+  { x: 1145, y: GROUND_Y, w: 505, h: GROUND_DEPTH },
+  { x: 1350, y: GROUND_Y - 80,  w: 100, h: 20, deco: 'block' },
+  { x: 1695, y: GROUND_Y, w: 905, h: GROUND_DEPTH },
 ];
 const LEVEL_WIDTH = 2600;
 const FINISH_X = 2440;
@@ -203,16 +211,16 @@ function makeEnemy(x, y, range, type) {
   return { x, y, w: 28, h: 28, vx: 0.7, startX: x, range, alive: true, type, anim: 0 };
 }
 const enemies = [
-  makeEnemy(300, GROUND_Y - 28, 120, 'goomba'),
-  makeEnemy(700, GROUND_Y - 28, 100, 'goomba'),
-  makeEnemy(1050, GROUND_Y - 28, 150, 'turtle'),
-  makeEnemy(1350, GROUND_Y - 28, 100, 'goomba'),
-  makeEnemy(2000, GROUND_Y - 28, 200, 'turtle'),
+  makeEnemy(250, GROUND_Y - 28, 150, 'goomba'),
+  makeEnemy(670, GROUND_Y - 28, 90, 'goomba'),
+  makeEnemy(970, GROUND_Y - 28, 110, 'turtle'),
+  makeEnemy(1400, GROUND_Y - 28, 180, 'goomba'),
+  makeEnemy(2100, GROUND_Y - 28, 200, 'turtle'),
 ];
 
 const player = {
   x: 40, y: GROUND_Y - 32, w: 24, h: 32,
-  vx: 0, vy: 0, onGround: false, facing: 1, alive: true, anim: 0,
+  vx: 0, vy: 0, onGround: false, facing: 1, alive: true, anim: 0, hurtTimer: 0,
 };
 let lives = 3;
 let camX = 0;
@@ -264,12 +272,13 @@ function updatePlayer() {
   else player.vx = 0;
 
   if ((keys['Space'] || keys['ArrowUp'] || keys['KeyW']) && player.onGround) {
-    player.vy = -9.5;
+    player.vy = -8;
     player.onGround = false;
     playSound('jump');
   }
 
   if (player.vx !== 0) player.anim += Math.abs(player.vx) * 0.15;
+  if (player.hurtTimer > 0) player.hurtTimer--;
 
   player.vy += GRAVITY;
   if (player.vy > 15) player.vy = 15;
@@ -321,6 +330,7 @@ function killPlayer() {
   if (state !== 'playing') return;
   lives--;
   playSound('hurt');
+  player.hurtTimer = 30; // ~0.5s showing the hurt pose
   document.getElementById('lives').textContent = Math.max(lives, 0);
   if (lives <= 0) {
     state = 'dead';
@@ -417,11 +427,22 @@ function draw() {
     drawFacing(frame, e.x, e.y, e.w, e.h, e.vx >= 0 ? 1 : -1);
   }
 
-  // player
-  const playerFrame = player.vx !== 0
-    ? sprites.player[Math.floor(player.anim) % sprites.player.length]
-    : sprites.player[0];
-  drawFacing(playerFrame, player.x, player.y, player.w, player.h, player.facing);
+  // player: pick a pose sprite for the current state, drawn bottom-anchored on the
+  // physics hitbox and scaled to CHAR_DISPLAY_HEIGHT (preserving the art's own aspect ratio)
+  let poseImg;
+  if (state === 'win') poseImg = charSprites.victory;
+  else if (player.hurtTimer > 0) poseImg = charSprites.hurt;
+  else if (!player.onGround) poseImg = charSprites.jump;
+  else if (player.vx !== 0) poseImg = charSprites.run;
+  else poseImg = charSprites.idle;
+
+  if (poseImg.naturalWidth > 0) {
+    const dispH = CHAR_DISPLAY_HEIGHT;
+    const dispW = dispH * (poseImg.naturalWidth / poseImg.naturalHeight);
+    const drawX = player.x + player.w / 2 - dispW / 2;
+    const drawY = player.y + player.h - dispH;
+    drawFacing(poseImg, drawX, drawY, dispW, dispH, player.facing);
+  }
 }
 
 function loop() {
