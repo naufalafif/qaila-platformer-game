@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Platformer</title>
+<style>
+  html, body {
+    margin: 0; width: 100%; height: 100%; background: #5c94fc; overflow: hidden;
+    overscroll-behavior: none; touch-action: none; -webkit-user-select: none; user-select: none;
+  }
+  canvas { display: block; background: #5c94fc; image-rendering: pixelated; touch-action: none; }
+  #hud {
+    position: fixed; top: max(10px, env(safe-area-inset-top)); left: max(16px, env(safe-area-inset-left));
+    font: bold clamp(14px, 3vw, 18px) monospace; color: #fff; text-shadow: 2px 2px #000;
+  }
+  #fsBtn {
+    position: fixed; top: max(10px, env(safe-area-inset-top)); right: max(16px, env(safe-area-inset-right));
+    font: bold clamp(12px, 2.6vw, 14px) monospace; padding: 6px 10px; cursor: pointer;
+    background: rgba(0,0,0,0.4); color: #fff; border: 2px solid #fff; border-radius: 4px;
+  }
+  #zoomControls {
+    position: fixed; top: calc(max(10px, env(safe-area-inset-top)) + 40px);
+    right: max(16px, env(safe-area-inset-right));
+    display: flex; gap: 6px;
+  }
+  .zoomBtn {
+    font: bold 18px monospace; width: 32px; height: 32px; padding: 0; cursor: pointer;
+    background: rgba(0,0,0,0.4); color: #fff; border: 2px solid #fff; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    touch-action: manipulation; user-select: none;
+  }
+  #overlay {
+    position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    flex-direction: column; font: bold clamp(20px, 6vw, 32px) monospace; color: #fff; text-shadow: 2px 2px #000;
+    background: rgba(0,0,0,0.4);
+  }
+  #overlay button {
+    margin-top: 16px; font: bold clamp(16px, 4vw, 18px) monospace; padding: 10px 20px; cursor: pointer;
+  }
+  #touchControls { display: none; }
+  @media (hover: none) and (pointer: coarse) {
+    #touchControls { display: block; }
+  }
+  .ctrlBtn {
+    position: fixed; bottom: max(24px, env(safe-area-inset-bottom));
+    width: 68px; height: 68px; border-radius: 50%;
+    background: rgba(255,255,255,0.25); border: 2px solid rgba(255,255,255,0.6);
+    color: #fff; font: bold 28px monospace; text-shadow: 1px 1px #000;
+    display: flex; align-items: center; justify-content: center;
+    touch-action: none; -webkit-user-select: none; user-select: none;
+  }
+  #btnLeft { left: max(24px, env(safe-area-inset-left)); }
+  #btnRight { left: max(104px, calc(env(safe-area-inset-left) + 104px)); }
+  #btnJump { right: max(24px, env(safe-area-inset-right)); width: 84px; height: 84px; font-size: 16px; }
+  .ctrlBtn.active { background: rgba(255,255,255,0.5); }
+  #rotateHint {
+    position: fixed; top: calc(max(10px, env(safe-area-inset-top)) + 40px); left: 50%; transform: translateX(-50%);
+    display: none; text-align: center; padding: 5px 12px; border-radius: 6px; max-width: 80vw;
+    font: bold clamp(10px, 3vw, 12px) monospace; color: #fff; background: rgba(0,0,0,0.55);
+    pointer-events: none;
+  }
+  @media (max-aspect-ratio: 1/1) and (max-width: 820px) {
+    #rotateHint { display: block; }
+  }
+</style>
+</head>
+<body>
+<div id="hud">Lives: <span id="lives">3</span></div>
+<button id="fsBtn">⛶ Fullscreen</button>
+<div id="zoomControls">
+  <button id="zoomOutBtn" class="zoomBtn">−</button>
+  <button id="zoomInBtn" class="zoomBtn">+</button>
+</div>
+<canvas id="game"></canvas>
+<div id="touchControls">
+  <div id="btnLeft" class="ctrlBtn">◀</div>
+  <div id="btnRight" class="ctrlBtn">▶</div>
+  <div id="btnJump" class="ctrlBtn">JUMP</div>
+</div>
+<div id="rotateHint">Tip: landscape gives a wider view</div>
+<div id="overlay">
+  <div id="overlayText"></div>
+  <button id="restartBtn">Restart</button>
+</div>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+// VIEW_WIDTH is the number of world-units shown across the screen width, so sprites are
+// a consistent, readable size regardless of device/window size. (Smaller = more zoomed in.)
+const ZOOM_MIN = 280, ZOOM_MAX = 680, ZOOM_STEP = 60, ZOOM_DEFAULT = 480;
+let VIEW_WIDTH = Number(localStorage.getItem('platformer_viewWidth')) || ZOOM_DEFAULT;
+let scale = 1;
+
+function updateScale() {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(window.innerWidth * dpr);
+  canvas.height = Math.round(window.innerHeight * dpr);
+  canvas.style.width = window.innerWidth + 'px';
+  canvas.style.height = window.innerHeight + 'px';
+  scale = canvas.width / VIEW_WIDTH;
+  ctx.imageSmoothingEnabled = false;
+}
+updateScale();
+
+function logicalHeight() { return canvas.height / scale; }
+
+const GRAVITY = 0.45; // slower/floatier fall, closer to classic platformer pacing (Mario/Ori)
+// GROUND_Y is a fixed proportion of the logical (world-unit) screen height, so the
+// ground always takes up the same small slice of the screen on any aspect ratio
+// (portrait phones included) instead of a fixed pixel value that could dominate a tall screen.
+const GROUND_RATIO = 0.72;
+let GROUND_Y = Math.round(logicalHeight() * GROUND_RATIO);
+const GROUND_DEPTH = 600; // deep enough to fill below the ground on any screen height
+
+// ---- Sounds (Kenney "Interface Sounds" & "Music Jingles" packs, CC0 - assets/sounds/) ----
+function loadSound(src) {
+  const audio = new Audio(src);
+  audio.volume = 0.5;
+  return audio;
+}
+const sounds = {
+  jump: loadSound('assets/sounds/jump.mp3'),
+  stomp: loadSound('assets/sounds/stomp.mp3'),
+  hurt: loadSound('assets/sounds/hurt.mp3'),
+  win: loadSound('assets/sounds/win.mp3'),
+  gameover: loadSound('assets/sounds/gameover.mp3'),
+};
+function playSound(name) {
+  const s = sounds[name];
+  s.currentTime = 0;
+  s.play().catch(() => {}); // ignore if not yet allowed by the browser's autoplay policy
+}
+
+const fsBtn = document.getElementById('fsBtn');
+fsBtn.addEventListener('click', () => {
+  const req = !document.fullscreenElement
+    ? document.documentElement.requestFullscreen()
+    : document.exitFullscreen();
+  req.catch(() => {}); // fullscreen isn't available on some mobile browsers (e.g. iOS Safari) - ignore
+});
+
+// on-screen touch controls (shown on touch devices via the #touchControls media query)
+function bindHoldButton(el, keyCode) {
+  const press = e => { e.preventDefault(); keys[keyCode] = true; el.classList.add('active'); };
+  const release = e => { e.preventDefault(); keys[keyCode] = false; el.classList.remove('active'); };
+  el.addEventListener('pointerdown', press);
+  el.addEventListener('pointerup', release);
+  el.addEventListener('pointercancel', release);
+  el.addEventListener('pointerleave', release);
+}
+bindHoldButton(document.getElementById('btnLeft'), 'ArrowLeft');
+bindHoldButton(document.getElementById('btnRight'), 'ArrowRight');
+bindHoldButton(document.getElementById('btnJump'), 'Space');
+
+// ---- Sprites (Kenney "Pixel Platformer" pack, CC0 - assets/KENNEY_LICENSE.txt) ----
+function loadImage(src) {
+  const img = new Image();
+  img.src = src;
+  return img;
+}
+const sprites = {
+  ground: loadImage('assets/ground.png'),
+  questionBlock: loadImage('assets/question_block.png'),
+  tree: loadImage('assets/tree.png'),
+  bush: loadImage('assets/bush.png'),
+  flagPole: loadImage('assets/flag_pole.png'),
+  flagBanner: loadImage('assets/flag_banner.png'),
+  player: [loadImage('assets/player_0.png'), loadImage('assets/player_1.png')],
+  goomba: [loadImage('assets/enemy_goomba_0.png'), loadImage('assets/enemy_goomba_1.png')],
+  turtle: [loadImage('assets/enemy_turtle_0.png'), loadImage('assets/enemy_turtle_1.png')],
+};
+const TILE = 30; // on-screen size for ground/block tiles
+
+// decorative trees & bushes along the level (purely visual, no collision)
+const decorations = [
+  { type: 'tree', x: 150 },  { type: 'bush', x: 260 },
+  { type: 'tree', x: 480 },  { type: 'tree', x: 640 },
+  { type: 'bush', x: 780 },  { type: 'tree', x: 900 },
+  { type: 'tree', x: 1080 }, { type: 'bush', x: 1200 },
+  { type: 'tree', x: 1340 }, { type: 'tree', x: 1500 },
+  { type: 'bush', x: 1700 }, { type: 'tree', x: 1900 },
+  { type: 'tree', x: 2050 }, { type: 'bush', x: 2200 },
+  { type: 'tree', x: 2350 },
+];
+
+// ---- Level layout ----
+// platforms: static rectangles the player and enemies can stand on
+const platforms = [
+  { x: 0,    y: GROUND_Y, w: 500,  h: GROUND_DEPTH },
+  { x: 560,  y: GROUND_Y, w: 300,  h: GROUND_DEPTH },
+  { x: 940,  y: GROUND_Y, w: 260,  h: GROUND_DEPTH },
+  { x: 620,  y: GROUND_Y - 100, w: 120, h: 20, deco: 'block' },
+  { x: 1260, y: GROUND_Y, w: 500,  h: GROUND_DEPTH },
+  { x: 1420, y: GROUND_Y - 80,  w: 100, h: 20, deco: 'block' },
+  { x: 1820, y: GROUND_Y, w: 700,  h: GROUND_DEPTH },
+];
+const LEVEL_WIDTH = 2600;
+const FINISH_X = 2440;
+
+function makeEnemy(x, y, range, type) {
+  return { x, y, w: 28, h: 28, vx: 0.7, startX: x, range, alive: true, type, anim: 0 };
+}
+const enemies = [
+  makeEnemy(300, GROUND_Y - 28, 120, 'goomba'),
+  makeEnemy(700, GROUND_Y - 28, 100, 'goomba'),
+  makeEnemy(1050, GROUND_Y - 28, 150, 'turtle'),
+  makeEnemy(1350, GROUND_Y - 28, 100, 'goomba'),
+  makeEnemy(2000, GROUND_Y - 28, 200, 'turtle'),
+];
+
+const player = {
+  x: 40, y: GROUND_Y - 32, w: 24, h: 32,
+  vx: 0, vy: 0, onGround: false, facing: 1, alive: true, anim: 0,
+};
+let lives = 3;
+let camX = 0;
+let state = 'playing'; // playing | win | dead
+const keys = {};
+
+document.addEventListener('keydown', e => keys[e.code] = true);
+document.addEventListener('keyup', e => keys[e.code] = false);
+document.getElementById('restartBtn').addEventListener('click', () => location.reload());
+
+// on resize/orientation-change, recompute scale and shift existing entities so the
+// ground stays at the same screen proportion instead of resetting the game
+function handleResize() {
+  updateScale();
+  const newGroundY = Math.round(logicalHeight() * GROUND_RATIO);
+  const dy = newGroundY - GROUND_Y;
+  if (dy !== 0) {
+    for (const p of platforms) p.y += dy;
+    for (const e of enemies) e.y += dy;
+    player.y += dy;
+    GROUND_Y = newGroundY;
+  }
+}
+window.addEventListener('resize', handleResize);
+window.addEventListener('orientationchange', handleResize);
+
+function setZoom(newViewWidth) {
+  VIEW_WIDTH = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newViewWidth));
+  localStorage.setItem('platformer_viewWidth', VIEW_WIDTH);
+  handleResize();
+}
+document.getElementById('zoomInBtn').addEventListener('click', () => setZoom(VIEW_WIDTH - ZOOM_STEP));
+document.getElementById('zoomOutBtn').addEventListener('click', () => setZoom(VIEW_WIDTH + ZOOM_STEP));
+
+function resetPlayerPosition() {
+  player.x = 40; player.y = GROUND_Y - 32;
+  player.vx = 0; player.vy = 0;
+  camX = 0;
+}
+
+function rectsOverlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function updatePlayer() {
+  // horizontal input
+  if (keys['ArrowLeft'] || keys['KeyA']) { player.vx = -1.6; player.facing = -1; }
+  else if (keys['ArrowRight'] || keys['KeyD']) { player.vx = 1.6; player.facing = 1; }
+  else player.vx = 0;
+
+  if ((keys['Space'] || keys['ArrowUp'] || keys['KeyW']) && player.onGround) {
+    player.vy = -9.5;
+    player.onGround = false;
+    playSound('jump');
+  }
+
+  if (player.vx !== 0) player.anim += Math.abs(player.vx) * 0.15;
+
+  player.vy += GRAVITY;
+  if (player.vy > 15) player.vy = 15;
+
+  // move horizontally, resolve collisions
+  player.x += player.vx;
+  for (const p of platforms) {
+    if (rectsOverlap(player, p)) {
+      if (player.vx > 0) player.x = p.x - player.w;
+      else if (player.vx < 0) player.x = p.x + p.w;
+    }
+  }
+  if (player.x < 0) player.x = 0;
+
+  // move vertically, resolve collisions
+  player.onGround = false;
+  player.y += player.vy;
+  for (const p of platforms) {
+    if (rectsOverlap(player, p)) {
+      if (player.vy > 0) {
+        player.y = p.y - player.h;
+        player.vy = 0;
+        player.onGround = true;
+      } else if (player.vy < 0) {
+        player.y = p.y + p.h;
+        player.vy = 0;
+      }
+    }
+  }
+
+  // fell into a pit
+  if (player.y > logicalHeight() + 100) {
+    killPlayer();
+  }
+
+  // camera follows player, clamped to level bounds
+  camX = player.x - VIEW_WIDTH / 3;
+  camX = Math.max(0, Math.min(camX, LEVEL_WIDTH - VIEW_WIDTH));
+
+  // reached the finish line
+  if (player.x >= FINISH_X) {
+    state = 'win';
+    playSound('win');
+    showOverlay('You Win!');
+  }
+}
+
+function killPlayer() {
+  if (state !== 'playing') return;
+  lives--;
+  playSound('hurt');
+  document.getElementById('lives').textContent = Math.max(lives, 0);
+  if (lives <= 0) {
+    state = 'dead';
+    playSound('gameover');
+    showOverlay('Game Over');
+  } else {
+    resetPlayerPosition();
+  }
+}
+
+function showOverlay(text) {
+  document.getElementById('overlayText').textContent = text;
+  document.getElementById('overlay').style.display = 'flex';
+}
+
+function updateEnemies() {
+  for (const e of enemies) {
+    if (!e.alive) continue;
+    e.x += e.vx;
+    e.anim += 0.1;
+    if (e.x < e.startX - e.range || e.x > e.startX + e.range) e.vx *= -1;
+
+    if (player.alive && rectsOverlap(player, e)) {
+      const playerFalling = player.vy > 0 && (player.y + player.h) - e.y < 14;
+      if (playerFalling) {
+        e.alive = false;
+        player.vy = -8; // bounce off stomped enemy
+        playSound('stomp');
+      } else {
+        killPlayer();
+      }
+    }
+  }
+}
+
+function drawTiled(img, x, y, w, h) {
+  for (let cy = 0; cy < h; cy += TILE) {
+    const th = Math.min(TILE, h - cy);
+    for (let cx = 0; cx < w; cx += TILE) {
+      ctx.drawImage(img, x + cx, y + cy, Math.min(TILE, w - cx), th);
+    }
+  }
+}
+
+// draw an image flipped horizontally around its own box when facing < 0
+function drawFacing(img, x, y, w, h, facing) {
+  if (facing < 0) {
+    ctx.save();
+    ctx.translate(x + w, y);
+    ctx.scale(-1, 1);
+    ctx.drawImage(img, 0, 0, w, h);
+    ctx.restore();
+  } else {
+    ctx.drawImage(img, x, y, w, h);
+  }
+}
+
+function draw() {
+  // sky gradient in screen space (fixed, behind the scrolling/scaled world)
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  sky.addColorStop(0, '#5c94fc');
+  sky.addColorStop(1, '#b8ddf5');
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // world space: scale so VIEW_WIDTH world-units always spans the screen, then pan by the camera
+  ctx.setTransform(scale, 0, 0, scale, -camX * scale, 0);
+
+  // background decorations (trees & bushes)
+  for (const d of decorations) {
+    const img = d.type === 'tree' ? sprites.tree : sprites.bush;
+    const w = 36, h = 36;
+    ctx.drawImage(img, d.x, GROUND_Y - h + 6, w, h);
+  }
+
+  // platforms (only draw down to the visible viewport, not the full fill depth)
+  for (const p of platforms) {
+    const img = p.deco === 'block' ? sprites.questionBlock : sprites.ground;
+    const visibleH = Math.min(p.h, logicalHeight() - p.y + TILE);
+    drawTiled(img, p.x, p.y, p.w, visibleH);
+  }
+
+  // finish flag pole
+  const poleTop = GROUND_Y - 190;
+  drawTiled(sprites.flagPole, FINISH_X + 20, poleTop, 18, GROUND_Y - poleTop);
+  ctx.drawImage(sprites.flagBanner, FINISH_X + 2, poleTop, 30, 30);
+
+  // enemies
+  for (const e of enemies) {
+    if (!e.alive) continue;
+    const frames = e.type === 'goomba' ? sprites.goomba : sprites.turtle;
+    const frame = frames[Math.floor(e.anim) % frames.length];
+    drawFacing(frame, e.x, e.y, e.w, e.h, e.vx >= 0 ? 1 : -1);
+  }
+
+  // player
+  const playerFrame = player.vx !== 0
+    ? sprites.player[Math.floor(player.anim) % sprites.player.length]
+    : sprites.player[0];
+  drawFacing(playerFrame, player.x, player.y, player.w, player.h, player.facing);
+}
+
+function loop() {
+  if (state === 'playing') {
+    updatePlayer();
+    updateEnemies();
+  }
+  draw();
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>
