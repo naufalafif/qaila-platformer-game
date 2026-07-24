@@ -12,8 +12,10 @@
   canvas { display: block; background: #5c94fc; image-rendering: pixelated; touch-action: none; }
   #hud {
     position: fixed; top: max(10px, env(safe-area-inset-top)); left: max(16px, env(safe-area-inset-left));
-    font: bold clamp(14px, 3vw, 18px) monospace; color: #fff; text-shadow: 2px 2px #000;
+    color: #fff; text-shadow: 2px 2px #000;
   }
+  #livesDisplay { font-size: clamp(16px, 4vw, 22px); letter-spacing: 2px; }
+  #attackDisplay { font-size: clamp(14px, 3.4vw, 18px); letter-spacing: 3px; margin-top: 2px; }
   #fsBtn {
     position: fixed; top: max(10px, env(safe-area-inset-top)); right: max(16px, env(safe-area-inset-right));
     font: bold clamp(12px, 2.6vw, 14px) monospace; padding: 6px 10px; cursor: pointer;
@@ -93,7 +95,10 @@
 </style>
 </head>
 <body>
-<div id="hud">Lives: <span id="lives">3</span></div>
+<div id="hud">
+  <div id="livesDisplay"></div>
+  <div id="attackDisplay"></div>
+</div>
 <button id="fsBtn">⛶ Fullscreen</button>
 <div id="zoomControls">
   <button id="zoomOutBtn" class="zoomBtn">−</button>
@@ -235,6 +240,8 @@ const ATTACK_DURATION = 24;       // total frames the attack pose/hitbox sequenc
 const ATTACK_ACTIVE = [8, 18];    // frame window (counting down from ATTACK_DURATION) where the hit connects
 const ATTACK_LUNGE = 10;          // world-units the sprite visually lunges forward mid-swing
 const ATTACK_REACH = 26;          // width of the attack hitbox extending in front of the player
+const MAX_ATTACK_CHARGES = 3;     // attacks in the "stock" before you have to wait
+const ATTACK_RECHARGE_TIME = 300; // frames (~5s at 60fps) for one spent charge to come back
 const TILE = 30; // on-screen size for ground/block tiles
 
 // decorative trees & bushes along the level (purely visual, no collision) -
@@ -280,7 +287,10 @@ const player = {
   hurtTimer: 0, attackTimer: 0, jumpsUsed: 0, invulnerable: 0,
 };
 const INVULN_DURATION = 90; // ~1.5s of blinking invincibility after getting hit - enough time to move away
-let lives = 3;
+const MAX_LIVES = 3;
+let lives = MAX_LIVES;
+let attackCharges = MAX_ATTACK_CHARGES;
+let attackRechargeTimer = 0;
 let camX = 0;
 let state = 'intro'; // intro | playing | win | dead
 const keys = {};
@@ -379,11 +389,19 @@ function updatePlayer() {
     }
   }
 
-  // attack - can't re-trigger until the current swing finishes; hits everything in
-  // front of the player during the active window in the middle of the swing
-  if (attackPressed && player.attackTimer <= 0) {
+  // attack - limited stock (MAX_ATTACK_CHARGES); each spent charge comes back on its own
+  // after ATTACK_RECHARGE_TIME, and you also can't re-trigger until the current swing finishes
+  if (attackPressed && player.attackTimer <= 0 && attackCharges > 0) {
     player.attackTimer = ATTACK_DURATION;
+    attackCharges--;
     playSound('attack');
+  }
+  if (attackCharges < MAX_ATTACK_CHARGES) {
+    attackRechargeTimer++;
+    if (attackRechargeTimer >= ATTACK_RECHARGE_TIME) {
+      attackCharges++;
+      attackRechargeTimer = 0;
+    }
   }
   if (player.attackTimer > 0) {
     player.attackTimer--;
@@ -464,7 +482,6 @@ function hurtPlayer(reposition) {
   playSound('hurt');
   player.hurtTimer = 30; // ~0.5s showing the hurt pose
   player.invulnerable = INVULN_DURATION;
-  document.getElementById('lives').textContent = Math.max(lives, 0);
   if (lives <= 0) {
     state = 'dead';
     playSound('gameover');
@@ -477,6 +494,13 @@ function hurtPlayer(reposition) {
 function showOverlay(text) {
   document.getElementById('overlayText').textContent = text;
   document.getElementById('overlay').style.display = 'flex';
+}
+
+const livesDisplayEl = document.getElementById('livesDisplay');
+const attackDisplayEl = document.getElementById('attackDisplay');
+function renderHud() {
+  livesDisplayEl.textContent = '❤️'.repeat(Math.max(lives, 0)) + '🤍'.repeat(Math.max(MAX_LIVES - lives, 0));
+  attackDisplayEl.textContent = '⚔️'.repeat(attackCharges) + '○'.repeat(MAX_ATTACK_CHARGES - attackCharges);
 }
 
 function updateEnemies() {
@@ -629,6 +653,7 @@ function loop() {
     updateEnemies();
     updateParticles();
   }
+  renderHud();
   draw();
   requestAnimationFrame(loop);
 }
