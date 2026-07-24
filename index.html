@@ -58,6 +58,14 @@
   #legend button {
     display: block; margin: 16px auto 0; font: bold 16px monospace; padding: 8px 20px; cursor: pointer;
   }
+  #outfitPicker { display: flex; justify-content: center; gap: 14px; margin: 14px 0; }
+  .outfitBtn {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    background: rgba(255,255,255,0.08); border: 2px solid rgba(255,255,255,0.4); border-radius: 8px;
+    padding: 8px 12px; cursor: pointer; color: #fff; font: bold 12px monospace;
+  }
+  .outfitBtn img { height: 64px; width: auto; }
+  .outfitBtn.selected { border-color: #ffd54a; background: rgba(255,213,74,0.18); }
   #overlay {
     position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
     flex-direction: column; font: bold clamp(20px, 6vw, 32px) monospace; color: #fff; text-shadow: 2px 2px #000;
@@ -121,6 +129,17 @@
     <div class="row"><span class="key">X</span> — Attack</div>
     <div class="row">On mobile: use the ◀ ▶ ⚔ JUMP buttons on screen</div>
     <div class="row">Stomp or attack enemies, avoid getting hit, reach the flag!</div>
+    <h2 style="margin-top:16px;">Choose your look</h2>
+    <div id="outfitPicker">
+      <button class="outfitBtn" data-outfit="casual">
+        <img src="assets/character/casual/idle.png" alt="Casual">
+        <span>Casual</span>
+      </button>
+      <button class="outfitBtn" data-outfit="hijab">
+        <img src="assets/character/hijab/idle.png" alt="Full Hijab">
+        <span>Full Hijab</span>
+      </button>
+    </div>
     <button id="legendCloseBtn">Let's go!</button>
   </div>
 </div>
@@ -161,7 +180,7 @@ const GROUND_DEPTH = 600; // deep enough to fill below the ground on any screen 
 
 // Bump this whenever an image/sound asset file changes - it's appended as a query string so
 // browsers (mobile Safari especially) can't serve a stale cached copy of the updated file.
-const ASSET_VERSION = 2;
+const ASSET_VERSION = 3;
 
 // ---- Sounds (Kenney "Interface Sounds" & "Music Jingles" packs, CC0 - assets/sounds/) ----
 function loadSound(src) {
@@ -224,16 +243,35 @@ const sprites = {
   goomba: [loadImage('assets/enemy_goomba_0.png'), loadImage('assets/enemy_goomba_1.png')],
   turtle: [loadImage('assets/enemy_turtle_0.png'), loadImage('assets/enemy_turtle_1.png')],
 };
-// Player character (custom art, cropped/background-removed from assets/main-character.png source sheet)
-const charSprites = {
-  idle: loadImage('assets/character/idle.png'),
-  run: loadImage('assets/character/run.png'),
-  jump: loadImage('assets/character/jump.png'),
-  doubleJump: loadImage('assets/character/doublejump.png'),
-  attack: loadImage('assets/character/attack.png'),
-  hurt: loadImage('assets/character/hurt.png'),
-  victory: loadImage('assets/character/victory.png'),
-};
+// Player character outfits (custom art, cropped/background-removed from the
+// assets/main-character*.png source sheets). Both sets are preloaded up front - they're
+// small images - so switching outfits is instant with no load flash.
+const OUTFITS = ['casual', 'hijab'];
+const charSpriteSets = {};
+for (const outfit of OUTFITS) {
+  charSpriteSets[outfit] = {
+    idle: loadImage(`assets/character/${outfit}/idle.png`),
+    run: loadImage(`assets/character/${outfit}/run.png`),
+    jump: loadImage(`assets/character/${outfit}/jump.png`),
+    doubleJump: loadImage(`assets/character/${outfit}/doublejump.png`),
+    attack: loadImage(`assets/character/${outfit}/attack.png`),
+    hurt: loadImage(`assets/character/${outfit}/hurt.png`),
+    victory: loadImage(`assets/character/${outfit}/victory.png`),
+  };
+}
+let selectedOutfit = OUTFITS.includes(localStorage.getItem('platformer_outfit')) ? localStorage.getItem('platformer_outfit') : 'casual';
+let charSprites = charSpriteSets[selectedOutfit];
+function setOutfit(outfit) {
+  if (!charSpriteSets[outfit]) return;
+  selectedOutfit = outfit;
+  charSprites = charSpriteSets[outfit];
+  localStorage.setItem('platformer_outfit', outfit);
+  document.querySelectorAll('.outfitBtn').forEach(b => b.classList.toggle('selected', b.dataset.outfit === outfit));
+}
+document.querySelectorAll('.outfitBtn').forEach(btn => {
+  btn.addEventListener('click', () => setOutfit(btn.dataset.outfit));
+});
+setOutfit(selectedOutfit); // apply the saved/default choice and mark its button selected
 const CHAR_DISPLAY_HEIGHT = 42; // world-unit height the character is drawn at (bottom-anchored on the hitbox)
 const JUMP_VELOCITY = -8;
 const ATTACK_DURATION = 24;       // total frames the attack pose/hitbox sequence lasts (~0.4s)
