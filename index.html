@@ -379,6 +379,27 @@ const keys = {};
 const keysPressed = new Set();
 
 document.addEventListener('keydown', e => {
+  // popups get their own keyboard nav instead of feeding into game input
+  if (!document.getElementById('legend').classList.contains('hidden')) {
+    if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+      e.preventDefault();
+      if (!e.repeat) {
+        const idx = OUTFITS.indexOf(selectedOutfit);
+        const dir = e.code === 'ArrowRight' ? 1 : -1;
+        setOutfit(OUTFITS[(idx + dir + OUTFITS.length) % OUTFITS.length]);
+      }
+      return;
+    }
+    if (e.code === 'Enter') {
+      e.preventDefault();
+      if (!e.repeat) document.getElementById('legendCloseBtn').click();
+      return;
+    }
+  } else if (document.getElementById('overlay').style.display === 'flex' && e.code === 'Enter') {
+    e.preventDefault();
+    if (!e.repeat) document.getElementById('restartBtn').click();
+    return;
+  }
   keys[e.code] = true;
   if (!e.repeat) keysPressed.add(e.code);
 });
