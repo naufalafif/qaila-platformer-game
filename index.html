@@ -68,12 +68,19 @@
   .outfitBtn.selected { border-color: #ffd54a; background: rgba(255,213,74,0.18); }
   #overlay {
     position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
-    flex-direction: column; font: bold clamp(20px, 6vw, 32px) monospace; color: #fff; text-shadow: 2px 2px #000;
-    background: rgba(0,0,0,0.4);
+    background: rgba(0,0,0,0.5);
+  }
+  #overlay .panel {
+    text-align: center; color: #fff; text-shadow: 2px 2px #000;
+    font: bold clamp(20px, 6vw, 32px) monospace;
+    background: rgba(20,30,50,0.9); border: 3px solid #fff; border-radius: 12px;
+    padding: 28px 36px;
   }
   #overlay button {
-    margin-top: 16px; font: bold clamp(16px, 4vw, 18px) monospace; padding: 10px 20px; cursor: pointer;
+    display: block; margin: 16px auto 0; font: bold clamp(16px, 4vw, 18px) monospace; padding: 10px 20px; cursor: pointer;
   }
+  #overlay.win .panel { border-color: #ffd54a; box-shadow: 0 0 26px rgba(255,213,74,0.6); }
+  #overlay.lose .panel { border-color: #ff6b6b; box-shadow: 0 0 18px rgba(255,107,107,0.4); }
   #touchControls { display: none; }
   @media (hover: none) and (pointer: coarse) {
     #touchControls { display: block; }
@@ -144,8 +151,10 @@
   </div>
 </div>
 <div id="overlay">
-  <div id="overlayText"></div>
-  <button id="restartBtn">Restart</button>
+  <div class="panel">
+    <div id="overlayText"></div>
+    <button id="restartBtn">Restart</button>
+  </div>
 </div>
 <script>
 const canvas = document.getElementById('game');
@@ -321,7 +330,7 @@ const enemies = [
 
 const player = {
   x: 40, y: GROUND_Y - 32, w: 24, h: 32,
-  vx: 0, vy: 0, onGround: false, facing: 1, alive: true, anim: 0,
+  vx: 0, vy: 0, onGround: true, facing: 1, alive: true, anim: 0,
   hurtTimer: 0, attackTimer: 0, jumpsUsed: 0, invulnerable: 0,
 };
 const INVULN_DURATION = 90; // ~1.5s of blinking invincibility after getting hit - enough time to move away
@@ -389,11 +398,23 @@ function rectsOverlap(a, b) {
 
 // small impact-spark burst, spawned where an attack lands a hit
 const particles = [];
-function spawnBurst(x, y) {
+function spawnBurst(x, y, color = '255,220,120') {
   for (let i = 0; i < 8; i++) {
     const angle = (Math.PI * 2 * i) / 8 + Math.random() * 0.5;
     const speed = 1 + Math.random() * 1.5;
-    particles.push({ x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, life: 18, maxLife: 18 });
+    particles.push({ x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, life: 18, maxLife: 18, color });
+  }
+}
+const CONFETTI_COLORS = ['255,200,60', '255,120,120', '120,200,255', '160,255,140', '255,255,255'];
+function spawnConfetti(x, y) {
+  for (let i = 0; i < 30; i++) {
+    const angle = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 0.9;
+    const speed = 2 + Math.random() * 3;
+    const life = 60 + Math.random() * 30;
+    particles.push({
+      x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed - 1,
+      life, maxLife: life, color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+    });
   }
 }
 function updateParticles() {
@@ -506,7 +527,8 @@ function updatePlayer() {
   if (player.x >= FINISH_X) {
     state = 'win';
     playSound('win');
-    showOverlay('You Win!');
+    spawnConfetti(player.x + player.w / 2, player.y);
+    showOverlay('🎉 You Win!', 'win');
   }
 
   keysPressed.clear(); // this frame's presses have been consumed
@@ -523,15 +545,18 @@ function hurtPlayer(reposition) {
   if (lives <= 0) {
     state = 'dead';
     playSound('gameover');
-    showOverlay('Game Over');
+    showOverlay('💀 Game Over', 'lose');
   } else if (reposition) {
     resetPlayerPosition();
   }
 }
 
-function showOverlay(text) {
+function showOverlay(text, kind) {
   document.getElementById('overlayText').textContent = text;
-  document.getElementById('overlay').style.display = 'flex';
+  const overlay = document.getElementById('overlay');
+  overlay.classList.remove('win', 'lose');
+  overlay.classList.add(kind);
+  overlay.style.display = 'flex';
 }
 
 const livesDisplayEl = document.getElementById('livesDisplay');
@@ -583,6 +608,58 @@ function drawFacing(img, x, y, w, h, facing) {
   }
 }
 
+// ---- Parallax background (clouds + distant hills) - fills the empty sky and adds depth.
+// Both scroll slower than the foreground (smaller parallax factor = further away/slower),
+// and repeat on a fixed period so they tile seamlessly across (and beyond) the level width.
+const CLOUD_PARALLAX = 0.3;
+const CLOUD_PERIOD = 420;
+const CLOUD_PATTERN = [
+  { dx: 40, size: 1.0, heightFrac: 0.12 },
+  { dx: 220, size: 0.7, heightFrac: 0.24 },
+  { dx: 340, size: 0.85, heightFrac: 0.08 },
+];
+const HILL_PARALLAX = 0.55;
+const HILL_PERIOD = 300;
+
+function drawCloudPuff(x, y, r) {
+  ctx.beginPath();
+  ctx.ellipse(x, y, r * 1.3, r * 0.7, 0, 0, Math.PI * 2);
+  ctx.ellipse(x - r * 0.7, y + r * 0.15, r * 0.8, r * 0.55, 0, 0, Math.PI * 2);
+  ctx.ellipse(x + r * 0.8, y + r * 0.1, r * 0.9, r * 0.6, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawHillMound(cx, r) {
+  ctx.beginPath();
+  ctx.arc(cx, GROUND_Y + 10, r, Math.PI, 0);
+  ctx.fill();
+}
+
+function drawParallaxBackground() {
+  const h = logicalHeight();
+
+  const cloudCamX = camX * CLOUD_PARALLAX;
+  ctx.setTransform(scale, 0, 0, scale, -cloudCamX * scale, 0);
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  const cloudStart = Math.floor((cloudCamX - 200) / CLOUD_PERIOD) - 1;
+  const cloudEnd = Math.ceil((cloudCamX + VIEW_WIDTH + 200) / CLOUD_PERIOD) + 1;
+  for (let t = cloudStart; t <= cloudEnd; t++) {
+    for (const c of CLOUD_PATTERN) {
+      drawCloudPuff(t * CLOUD_PERIOD + c.dx, h * c.heightFrac, 26 * c.size);
+    }
+  }
+
+  const hillCamX = camX * HILL_PARALLAX;
+  ctx.setTransform(scale, 0, 0, scale, -hillCamX * scale, 0);
+  ctx.fillStyle = 'rgba(110,165,190,0.55)';
+  const hillStart = Math.floor((hillCamX - 200) / HILL_PERIOD) - 1;
+  const hillEnd = Math.ceil((hillCamX + VIEW_WIDTH + 200) / HILL_PERIOD) + 1;
+  for (let t = hillStart; t <= hillEnd; t++) {
+    drawHillMound(t * HILL_PERIOD + 60, 110);
+    drawHillMound(t * HILL_PERIOD + 220, 80);
+  }
+}
+
 function draw() {
   // sky gradient in screen space (fixed, behind the scrolling/scaled world)
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -591,6 +668,8 @@ function draw() {
   sky.addColorStop(1, '#b8ddf5');
   ctx.fillStyle = sky;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  drawParallaxBackground();
 
   // world space: scale so VIEW_WIDTH world-units always spans the screen, then pan by the camera
   ctx.setTransform(scale, 0, 0, scale, -camX * scale, 0);
@@ -632,8 +711,10 @@ function draw() {
   else if (player.vx !== 0) poseImg = charSprites.run;
   else poseImg = charSprites.idle;
 
-  // while invulnerable after getting hit, blink on/off every 4 frames (classic i-frames feedback)
-  const blinkedOut = player.invulnerable > 0 && Math.floor(player.invulnerable / 4) % 2 === 0;
+  // while invulnerable after getting hit, blink on/off every 4 frames (classic i-frames feedback).
+  // Gated on state === 'playing' so the blink can't freeze the character invisible forever on the
+  // win/game-over screen (the timer stops decrementing once the game stops updating).
+  const blinkedOut = state === 'playing' && player.invulnerable > 0 && Math.floor(player.invulnerable / 4) % 2 === 0;
 
   if (poseImg.naturalWidth > 0 && !blinkedOut) {
     const dispH = CHAR_DISPLAY_HEIGHT;
@@ -675,10 +756,10 @@ function draw() {
     ctx.restore();
   }
 
-  // impact particles (spawned where a successful attack hit lands)
+  // particles (attack-hit sparks, win confetti, etc.)
   for (const p of particles) {
     const alpha = p.life / p.maxLife;
-    ctx.fillStyle = `rgba(255,220,120,${alpha.toFixed(2)})`;
+    ctx.fillStyle = `rgba(${p.color},${alpha.toFixed(2)})`;
     ctx.beginPath();
     ctx.arc(p.x, p.y, 2.5 * alpha + 1, 0, Math.PI * 2);
     ctx.fill();
@@ -689,8 +770,10 @@ function loop() {
   if (state === 'playing') {
     updatePlayer();
     updateEnemies();
-    updateParticles();
   }
+  // particles (confetti, hit sparks) keep animating even after the game stops (e.g. on win/game
+  // over) instead of freezing mid-flight wherever they happened to be at that instant
+  updateParticles();
   renderHud();
   draw();
   requestAnimationFrame(loop);
