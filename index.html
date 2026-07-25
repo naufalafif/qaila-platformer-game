@@ -189,7 +189,7 @@ const GROUND_DEPTH = 600; // deep enough to fill below the ground on any screen 
 
 // Bump this whenever an image/sound asset file changes - it's appended as a query string so
 // browsers (mobile Safari especially) can't serve a stale cached copy of the updated file.
-const ASSET_VERSION = 4;
+const ASSET_VERSION = 5;
 
 // ---- Sounds (Kenney "Interface Sounds" & "Music Jingles" packs, CC0 - assets/sounds/) ----
 function loadSound(src) {
@@ -251,6 +251,13 @@ const sprites = {
   flagBanner: loadImage('assets/flag_banner.png'),
   goomba: [loadImage('assets/enemy_goomba_0.png'), loadImage('assets/enemy_goomba_1.png')],
   turtle: [loadImage('assets/enemy_turtle_0.png'), loadImage('assets/enemy_turtle_1.png')],
+  // parallax background (Kenney "Background Elements" pack, CC0 - assets/background/KENNEY_LICENSE.txt)
+  cloud1: loadImage('assets/background/cloud1.png'),
+  cloud2: loadImage('assets/background/cloud2.png'),
+  cloud3: loadImage('assets/background/cloud3.png'),
+  cloud4: loadImage('assets/background/cloud4.png'),
+  hillsFar: loadImage('assets/background/hills_far.png'),
+  hillsNear: loadImage('assets/background/hills_near.png'),
 };
 // Player character outfits (custom art, cropped/background-removed from the
 // assets/main-character*.png source sheets). Both sets are preloaded up front - they're
@@ -608,56 +615,81 @@ function drawFacing(img, x, y, w, h, facing) {
   }
 }
 
-// ---- Parallax background (clouds + distant hills) - fills the empty sky and adds depth.
-// Both scroll slower than the foreground (smaller parallax factor = further away/slower),
-// and repeat on a fixed period so they tile seamlessly across (and beyond) the level width.
+// ---- Parallax background (Kenney "Background Elements" sprites) - fills the empty sky and
+// adds depth. Layers scroll slower than the foreground (smaller parallax factor = further
+// away/slower); the hill strips tile on a fixed period matching their own source width.
 const CLOUD_PARALLAX = 0.3;
-const CLOUD_PERIOD = 420;
+const CLOUD_PERIOD = 600;
 const CLOUD_PATTERN = [
-  { dx: 40, size: 1.0, heightFrac: 0.12 },
-  { dx: 220, size: 0.7, heightFrac: 0.24 },
-  { dx: 340, size: 0.85, heightFrac: 0.08 },
+  { img: 'cloud1', dx: 40,  size: 0.9,  heightFrac: 0.10 },
+  { img: 'cloud2', dx: 230, size: 0.6,  heightFrac: 0.24 },
+  { img: 'cloud3', dx: 360, size: 0.75, heightFrac: 0.06 },
+  { img: 'cloud4', dx: 500, size: 0.65, heightFrac: 0.17 },
 ];
-const HILL_PARALLAX = 0.55;
-const HILL_PERIOD = 300;
+const HILL_FAR = { parallax: 0.35, height: 65, alpha: 0.5 };
+const HILL_NEAR = { parallax: 0.55, height: 85, alpha: 0.8, phaseShift: true };
 
-function drawCloudPuff(x, y, r) {
-  ctx.beginPath();
-  ctx.ellipse(x, y, r * 1.3, r * 0.7, 0, 0, Math.PI * 2);
-  ctx.ellipse(x - r * 0.7, y + r * 0.15, r * 0.8, r * 0.55, 0, 0, Math.PI * 2);
-  ctx.ellipse(x + r * 0.8, y + r * 0.1, r * 0.9, r * 0.6, 0, 0, Math.PI * 2);
-  ctx.fill();
+function drawCloud(img, x, y, targetWidth) {
+  if (!img.naturalWidth) return;
+  const w = targetWidth;
+  const h = targetWidth * (img.naturalHeight / img.naturalWidth);
+  ctx.drawImage(img, x, y, w, h);
 }
 
-function drawHillMound(cx, r) {
-  ctx.beginPath();
-  ctx.arc(cx, GROUND_Y + 10, r, Math.PI, 0);
-  ctx.fill();
+function drawHillLayer(img, layer) {
+  if (!img.naturalWidth) return;
+  // scale the tile width to match the image's own aspect ratio at this layer's display height,
+  // so the strip isn't stretched out of proportion
+  const tileWidth = layer.height * (img.naturalWidth / img.naturalHeight);
+  const phase = layer.phaseShift ? tileWidth / 2 : 0;
+  const layerCamX = camX * layer.parallax - phase;
+  ctx.setTransform(scale, 0, 0, scale, -layerCamX * scale, 0);
+  ctx.globalAlpha = layer.alpha;
+  const start = Math.floor((layerCamX - 100) / tileWidth) - 1;
+  const end = Math.ceil((layerCamX + VIEW_WIDTH + 100) / tileWidth) + 1;
+  const bottomY = GROUND_Y + 15;
+  const topY = bottomY - layer.height;
+  for (let t = start; t <= end; t++) {
+    // this source strip isn't a perfectly seamless tile (its left/right edges don't quite
+    // match), so mirror every other repeat - a flipped copy always matches itself at the seam,
+    // regardless of whether the source image tiles cleanly on its own
+    const left = t * tileWidth;
+    const overlap = 0.75; // a hair wider than the tile step, to hide any sub-pixel canvas seam
+    if ((((t % 2) + 2) % 2) === 1) {
+      ctx.save();
+      ctx.translate(left + tileWidth, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(img, -overlap / 2, topY, tileWidth + overlap, layer.height);
+      ctx.restore();
+    } else {
+      ctx.drawImage(img, left - overlap / 2, topY, tileWidth + overlap, layer.height);
+    }
+  }
+  ctx.globalAlpha = 1;
 }
 
 function drawParallaxBackground() {
   const h = logicalHeight();
 
+  // this background art is smooth/vector, not pixel-art, and gets scaled down a lot - nearest-
+  // neighbor sampling (the canvas default here, for crisp pixel-art elsewhere) causes visible
+  // aliasing seams on it, so briefly switch to smooth interpolation just for this layer
+  ctx.imageSmoothingEnabled = true;
+
+  drawHillLayer(sprites.hillsFar, HILL_FAR);
+  drawHillLayer(sprites.hillsNear, HILL_NEAR);
+
   const cloudCamX = camX * CLOUD_PARALLAX;
   ctx.setTransform(scale, 0, 0, scale, -cloudCamX * scale, 0);
-  ctx.fillStyle = 'rgba(255,255,255,0.85)';
   const cloudStart = Math.floor((cloudCamX - 200) / CLOUD_PERIOD) - 1;
   const cloudEnd = Math.ceil((cloudCamX + VIEW_WIDTH + 200) / CLOUD_PERIOD) + 1;
   for (let t = cloudStart; t <= cloudEnd; t++) {
     for (const c of CLOUD_PATTERN) {
-      drawCloudPuff(t * CLOUD_PERIOD + c.dx, h * c.heightFrac, 26 * c.size);
+      drawCloud(sprites[c.img], t * CLOUD_PERIOD + c.dx, h * c.heightFrac, 90 * c.size);
     }
   }
 
-  const hillCamX = camX * HILL_PARALLAX;
-  ctx.setTransform(scale, 0, 0, scale, -hillCamX * scale, 0);
-  ctx.fillStyle = 'rgba(110,165,190,0.55)';
-  const hillStart = Math.floor((hillCamX - 200) / HILL_PERIOD) - 1;
-  const hillEnd = Math.ceil((hillCamX + VIEW_WIDTH + 200) / HILL_PERIOD) + 1;
-  for (let t = hillStart; t <= hillEnd; t++) {
-    drawHillMound(t * HILL_PERIOD + 60, 110);
-    drawHillMound(t * HILL_PERIOD + 220, 80);
-  }
+  ctx.imageSmoothingEnabled = false; // restore crisp pixel-art rendering for everything else
 }
 
 function draw() {
