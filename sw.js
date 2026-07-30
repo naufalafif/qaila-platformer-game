@@ -1,6 +1,6 @@
-const CACHE_NAME = 'platformer-cache-v2';
+const CACHE_NAME = 'platformer-cache-v3';
 
-const ASSET_VERSION = 6;
+const ASSET_VERSION = 7;
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
 const PRECACHE_URLS = [
@@ -40,7 +40,6 @@ const PRECACHE_URLS = [
   v('assets/character/hijab/run_frames/run2.png'),
   v('assets/character/hijab/run_frames/run3.png'),
   v('assets/character/hijab/run_frames/run4.png'),
-  v('assets/character/hijab/run_frames/run5.png'),
   v('assets/character/hijab/jump.png'),
   v('assets/character/hijab/doublejump.png'),
   v('assets/character/hijab/attack.png'),

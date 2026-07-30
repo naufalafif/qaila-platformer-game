@@ -215,7 +215,7 @@ const GROUND_DEPTH = 600; // deep enough to fill below the ground on any screen 
 
 // Bump this whenever an image/sound asset file changes - it's appended as a query string so
 // browsers (mobile Safari especially) can't serve a stale cached copy of the updated file.
-const ASSET_VERSION = 6;
+const ASSET_VERSION = 7;
 
 // ---- Sounds (Kenney "Interface Sounds" & "Music Jingles" packs, CC0 - assets/sounds/) ----
 function loadSound(src) {
@@ -289,7 +289,7 @@ const sprites = {
 // assets/main-character*.png source sheets). Both sets are preloaded up front - they're
 // small images - so switching outfits is instant with no load flash.
 const OUTFITS = ['casual', 'hijab'];
-const RUN_FRAME_COUNT = { casual: 6, hijab: 5 };
+const RUN_FRAME_COUNT = { casual: 6, hijab: 4 };
 const charSpriteSets = {};
 for (const outfit of OUTFITS) {
   charSpriteSets[outfit] = {
