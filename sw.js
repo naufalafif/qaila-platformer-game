@@ -1,6 +1,6 @@
-const CACHE_NAME = 'platformer-cache-v1';
+const CACHE_NAME = 'platformer-cache-v2';
 
-const ASSET_VERSION = 5;
+const ASSET_VERSION = 6;
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
 const PRECACHE_URLS = [
@@ -24,14 +24,23 @@ const PRECACHE_URLS = [
   v('assets/background/hills_far.png'),
   v('assets/background/hills_near.png'),
   v('assets/character/casual/idle.png'),
-  v('assets/character/casual/run.png'),
+  v('assets/character/casual/run_frames/run1.png'),
+  v('assets/character/casual/run_frames/run2.png'),
+  v('assets/character/casual/run_frames/run3.png'),
+  v('assets/character/casual/run_frames/run4.png'),
+  v('assets/character/casual/run_frames/run5.png'),
+  v('assets/character/casual/run_frames/run6.png'),
   v('assets/character/casual/jump.png'),
   v('assets/character/casual/doublejump.png'),
   v('assets/character/casual/attack.png'),
   v('assets/character/casual/hurt.png'),
   v('assets/character/casual/victory.png'),
   v('assets/character/hijab/idle.png'),
-  v('assets/character/hijab/run.png'),
+  v('assets/character/hijab/run_frames/run1.png'),
+  v('assets/character/hijab/run_frames/run2.png'),
+  v('assets/character/hijab/run_frames/run3.png'),
+  v('assets/character/hijab/run_frames/run4.png'),
+  v('assets/character/hijab/run_frames/run5.png'),
   v('assets/character/hijab/jump.png'),
   v('assets/character/hijab/doublejump.png'),
   v('assets/character/hijab/attack.png'),

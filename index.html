@@ -215,7 +215,7 @@ const GROUND_DEPTH = 600; // deep enough to fill below the ground on any screen 
 
 // Bump this whenever an image/sound asset file changes - it's appended as a query string so
 // browsers (mobile Safari especially) can't serve a stale cached copy of the updated file.
-const ASSET_VERSION = 5;
+const ASSET_VERSION = 6;
 
 // ---- Sounds (Kenney "Interface Sounds" & "Music Jingles" packs, CC0 - assets/sounds/) ----
 function loadSound(src) {
@@ -289,11 +289,13 @@ const sprites = {
 // assets/main-character*.png source sheets). Both sets are preloaded up front - they're
 // small images - so switching outfits is instant with no load flash.
 const OUTFITS = ['casual', 'hijab'];
+const RUN_FRAME_COUNT = { casual: 6, hijab: 5 };
 const charSpriteSets = {};
 for (const outfit of OUTFITS) {
   charSpriteSets[outfit] = {
     idle: loadImage(`assets/character/${outfit}/idle.png`),
-    run: loadImage(`assets/character/${outfit}/run.png`),
+    run: Array.from({ length: RUN_FRAME_COUNT[outfit] },
+      (_, i) => loadImage(`assets/character/${outfit}/run_frames/run${i + 1}.png`)),
     jump: loadImage(`assets/character/${outfit}/jump.png`),
     doubleJump: loadImage(`assets/character/${outfit}/doublejump.png`),
     attack: loadImage(`assets/character/${outfit}/attack.png`),
@@ -481,6 +483,24 @@ function updateParticles() {
   }
 }
 
+// win sequence: touching the flag freezes gameplay and plays a short celebration
+// (flag climbing the pole + confetti bursts) before the "You Win!" overlay appears
+const FLAG_RAISE_DURATION = 50; // frames for the banner to climb to the top of the pole
+const WIN_SEQUENCE_DURATION = 100; // frames before the overlay shows, so there's time to enjoy it
+let winSequenceTimer = 0;
+let flagRaiseProgress = 0; // 0 = resting low on the pole, 1 = fully raised
+function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+function updateWinSequence() {
+  if (state !== 'winSequence') return;
+  flagRaiseProgress = Math.min(1, flagRaiseProgress + 1 / FLAG_RAISE_DURATION);
+  if (winSequenceTimer % 20 === 0) spawnConfetti(player.x + player.w / 2, player.y - 10);
+  winSequenceTimer--;
+  if (winSequenceTimer <= 0) {
+    state = 'win';
+    showOverlay('🎉 You Win!', 'win');
+  }
+}
+
 function updatePlayer() {
   const jumpPressed = keysPressed.has('Space') || keysPressed.has('ArrowUp') || keysPressed.has('KeyW');
   const attackPressed = keysPressed.has('KeyX');
@@ -579,12 +599,13 @@ function updatePlayer() {
   camX = player.x - VIEW_WIDTH / 3;
   camX = Math.max(0, Math.min(camX, LEVEL_WIDTH - VIEW_WIDTH));
 
-  // reached the finish line
+  // reached the finish line - freeze gameplay and celebrate before showing the overlay
   if (player.x >= FINISH_X) {
-    state = 'win';
+    state = 'winSequence';
     playSound('win');
     spawnConfetti(player.x + player.w / 2, player.y);
-    showOverlay('🎉 You Win!', 'win');
+    winSequenceTimer = WIN_SEQUENCE_DURATION;
+    flagRaiseProgress = 0;
   }
 
   keysPressed.clear(); // this frame's presses have been consumed
@@ -769,10 +790,12 @@ function draw() {
     drawTiled(img, p.x, p.y, p.w, visibleH);
   }
 
-  // finish flag pole
+  // finish flag pole - banner rests low until the win sequence raises it to the top
   const poleTop = GROUND_Y - 190;
+  const bannerRestY = GROUND_Y - 40;
+  const bannerY = bannerRestY - (bannerRestY - poleTop) * easeOutCubic(flagRaiseProgress);
   drawTiled(sprites.flagPole, FINISH_X + 20, poleTop, 18, GROUND_Y - poleTop);
-  ctx.drawImage(sprites.flagBanner, FINISH_X + 2, poleTop, 30, 30);
+  ctx.drawImage(sprites.flagBanner, FINISH_X + 2, bannerY, 30, 30);
 
   // enemies
   for (const e of enemies) {
@@ -785,11 +808,11 @@ function draw() {
   // player: pick a pose sprite for the current state, drawn bottom-anchored on the
   // physics hitbox and scaled to CHAR_DISPLAY_HEIGHT (preserving the art's own aspect ratio)
   let poseImg;
-  if (state === 'win') poseImg = charSprites.victory;
+  if (state === 'win' || state === 'winSequence') poseImg = charSprites.victory;
   else if (player.hurtTimer > 0) poseImg = charSprites.hurt;
   else if (player.attackTimer > 0) poseImg = charSprites.attack;
   else if (!player.onGround) poseImg = player.jumpsUsed >= 2 ? charSprites.doubleJump : charSprites.jump;
-  else if (player.vx !== 0) poseImg = charSprites.run;
+  else if (player.vx !== 0) poseImg = charSprites.run[Math.floor(player.anim) % charSprites.run.length];
   else poseImg = charSprites.idle;
 
   // while invulnerable after getting hit, blink on/off every 4 frames (classic i-frames feedback).
@@ -852,6 +875,7 @@ function loop() {
     updatePlayer();
     updateEnemies();
   }
+  updateWinSequence();
   // particles (confetti, hit sparks) keep animating even after the game stops (e.g. on win/game
   // over) instead of freezing mid-flight wherever they happened to be at that instant
   updateParticles();
