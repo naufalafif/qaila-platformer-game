@@ -25,6 +25,17 @@
   }
   #livesDisplay { font-size: clamp(16px, 4vw, 22px); letter-spacing: 2px; }
   #attackDisplay { font-size: clamp(14px, 3.4vw, 18px); letter-spacing: 3px; margin-top: 2px; }
+  #questTracker {
+    font-size: clamp(11px, 2.6vw, 13px); margin-top: 6px; max-width: 60vw;
+    background: rgba(0,0,0,0.35); padding: 3px 8px; border-radius: 4px; display: inline-block;
+  }
+  #questTracker:empty { display: none; }
+  #toast {
+    position: fixed; top: max(90px, calc(env(safe-area-inset-top) + 90px)); left: 50%;
+    transform: translateX(-50%); background: rgba(0,0,0,0.75); color: #fff; text-shadow: 1px 1px #000;
+    font: bold clamp(12px, 3vw, 15px) monospace; padding: 8px 16px; border-radius: 8px;
+    z-index: 15; pointer-events: none; display: none; text-align: center; max-width: 80vw;
+  }
   #fsBtn {
     position: fixed; top: max(10px, env(safe-area-inset-top)); right: max(16px, env(safe-area-inset-right));
     font: bold clamp(12px, 2.6vw, 14px) monospace; padding: 6px 10px; cursor: pointer;
@@ -81,6 +92,24 @@
   }
   .outfitBtn img { height: 64px; width: auto; }
   .outfitBtn.selected { border-color: #ffd54a; background: rgba(255,213,74,0.18); }
+  #dialogue {
+    position: fixed; inset: 0; display: flex; align-items: flex-end; justify-content: center;
+    background: rgba(0,0,0,0.35); z-index: 20; padding: 16px; box-sizing: border-box;
+  }
+  #dialogue.hidden { display: none; }
+  #dialogue .panel {
+    background: rgba(20,30,50,0.95); border: 3px solid #fff; border-radius: 10px;
+    padding: 16px 20px; max-width: 480px; width: 100%; color: #fff; font: 14px monospace;
+    margin-bottom: max(24px, env(safe-area-inset-bottom));
+    display: flex; gap: 14px; align-items: flex-start; box-sizing: border-box;
+  }
+  #dialoguePortrait { font-size: 40px; line-height: 1; flex-shrink: 0; }
+  #dialogueBody { flex: 1; }
+  #dialogueName { font-weight: bold; color: #ffd54a; margin-bottom: 6px; }
+  #dialogueText { line-height: 1.4; }
+  #dialogueContinueBtn {
+    display: block; margin: 12px 0 0 auto; font: bold 13px monospace; padding: 6px 16px; cursor: pointer;
+  }
   #overlay {
     position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
     background: rgba(0,0,0,0.5);
@@ -139,7 +168,9 @@
 <div id="hud">
   <div id="livesDisplay"></div>
   <div id="attackDisplay"></div>
+  <div id="questTracker"></div>
 </div>
+<div id="toast"></div>
 <button id="fsBtn">⛶ Fullscreen</button>
 <div id="zoomControls">
   <button id="zoomOutBtn" class="zoomBtn">−</button>
@@ -161,7 +192,7 @@
     <div class="row"><span class="key">Space</span> or <span class="key">▲</span> — Jump (press again in air to double-jump)</div>
     <div class="row"><span class="key">X</span> — Attack</div>
     <div class="row">On mobile: use the ◀ ▶ ⚔ JUMP buttons on screen</div>
-    <div class="row">Stomp or attack enemies, avoid getting hit, reach the flag!</div>
+    <div class="row">Stomp or attack grumpy critters to cheer them up, avoid getting hit, and help out along the way!</div>
     <h2 class="section">Choose your look</h2>
     <div id="outfitPicker">
       <button class="outfitBtn" data-outfit="casual">
@@ -174,6 +205,16 @@
       </button>
     </div>
     <button id="legendCloseBtn">Let's go!</button>
+  </div>
+</div>
+<div id="dialogue" class="hidden">
+  <div class="panel">
+    <div id="dialoguePortrait"></div>
+    <div id="dialogueBody">
+      <div id="dialogueName"></div>
+      <div id="dialogueText"></div>
+      <button id="dialogueContinueBtn">Continue ▶</button>
+    </div>
   </div>
 </div>
 <div id="overlay">
@@ -363,6 +404,62 @@ const enemies = [
   makeEnemy(2100, GROUND_Y - 28, 200, 'turtle'),
 ];
 
+// ---- Chapter 1 quest: "Grandma Amina's Kitchen" (see STORY.md) ----
+const GRANDMA_X = 80; // between player spawn (x:40) and the first tree decoration (x:150)
+const POT_X = 2350;
+let questStage = 'not_started'; // not_started | started | item_collected | complete
+let firstEnemyDefeated = false;
+
+const CH1_SETUP = [
+  { name: 'Grandma Amina', portrait: '👵', text: "Oh dear! The wind blew my favorite cooking pot down the hill, right past the old bridge! I can't run after it — my knees aren't what they used to be." },
+  { name: 'Grandma Amina', portrait: '👵', text: 'Could a brave girl like you fetch it for me?' },
+];
+const CH1_RESOLUTION = [
+  { name: 'Grandma Amina', portrait: '👵', text: "You found it! You didn't have to do that, you know." },
+  { name: 'Grandma Amina', portrait: '👵', text: "But you did anyway. That's what kindness looks like, Qaila. Thank you." },
+];
+
+function updateQuestTracker() {
+  const el = document.getElementById('questTracker');
+  if (questStage === 'started') el.textContent = "Quest: Find Grandma's cooking pot!";
+  else if (questStage === 'item_collected') el.textContent = 'Quest: Bring the pot back to Grandma Amina!';
+  else el.textContent = '';
+}
+
+// Grandma Amina and the quest pot are drawn as simple emoji + flat shapes rather than new
+// sprite sheets - keeps this quest shippable without a new art pipeline; easy to swap for
+// real art later since both are self-contained draw functions.
+function drawGrandmaAmina() {
+  const x = GRANDMA_X;
+  // small hut for context, drawn to the left; Grandma herself stands clear of it
+  // to the right so her emoji doesn't overlap the hut's walls
+  ctx.fillStyle = '#c97b3d';
+  ctx.fillRect(x - 14, GROUND_Y - 46, 50, 46);
+  ctx.fillStyle = '#8b4a2b';
+  ctx.beginPath();
+  ctx.moveTo(x - 22, GROUND_Y - 46);
+  ctx.lineTo(x + 11, GROUND_Y - 74);
+  ctx.lineTo(x + 44, GROUND_Y - 46);
+  ctx.closePath();
+  ctx.fill();
+  ctx.font = '30px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText('👵', x + 48, GROUND_Y);
+  ctx.textAlign = 'left';
+}
+
+function drawPot() {
+  if (questStage !== 'started') return;
+  const bobY = GROUND_Y - 44 + Math.sin(frameCount * 0.08) * 4;
+  ctx.font = '26px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('🍲', POT_X, bobY);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+}
+
 const player = {
   x: 40, y: GROUND_Y - 32, w: 24, h: 32,
   vx: 0, vy: 0, onGround: true, facing: 1, alive: true, anim: 0,
@@ -374,7 +471,8 @@ let lives = MAX_LIVES;
 let attackCharges = MAX_ATTACK_CHARGES;
 let attackRechargeTimer = 0;
 let camX = 0;
-let state = 'intro'; // intro | playing | win | dead
+let state = 'intro'; // intro | playing | win | dead | winSequence | resolution
+let frameCount = 0; // simple frame counter for cosmetic animation (e.g. the quest pot's bob)
 const keys = {};
 // keysPressed: "just pressed this frame" edge detection (as opposed to `keys`, which is
 // held-down level state) - needed so jump/attack trigger once per press, not once per frame held
@@ -397,6 +495,12 @@ document.addEventListener('keydown', e => {
       if (!e.repeat) document.getElementById('legendCloseBtn').click();
       return;
     }
+  } else if (!document.getElementById('dialogue').classList.contains('hidden')) {
+    if (e.code === 'Enter' || e.code === 'Space') {
+      e.preventDefault();
+      if (!e.repeat) advanceDialogue();
+      return;
+    }
   } else if (document.getElementById('overlay').style.display === 'flex' && e.code === 'Enter') {
     e.preventDefault();
     if (!e.repeat) document.getElementById('restartBtn').click();
@@ -412,7 +516,17 @@ const legend = document.getElementById('legend');
 document.getElementById('legendCloseBtn').addEventListener('click', () => {
   legend.classList.add('hidden');
   document.body.classList.remove('legendOpen');
-  if (state === 'intro') state = 'playing';
+  if (state === 'intro') {
+    if (questStage === 'not_started') {
+      showDialogue(CH1_SETUP, () => {
+        questStage = 'started';
+        updateQuestTracker();
+        state = 'playing';
+      });
+    } else {
+      state = 'playing';
+    }
+  }
 });
 document.getElementById('helpBtn').addEventListener('click', () => {
   legend.classList.remove('hidden');
@@ -463,6 +577,13 @@ function spawnBurst(x, y, color = '255,220,120') {
     particles.push({ x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, life: 18, maxLife: 18, color });
   }
 }
+// first enemy "un-grumped" gets a one-time flavor toast tying the mechanic back to the story
+function onEnemyDefeated(e) {
+  if (firstEnemyDefeated) return;
+  firstEnemyDefeated = true;
+  const name = e.type === 'goomba' ? 'Grumblet' : 'Shy-Shell';
+  showToast(`✨ ${name}: "...wait, why do I feel like giggling? Thanks!"`);
+}
 const CONFETTI_COLORS = ['255,200,60', '255,120,120', '120,200,255', '160,255,140', '255,255,255'];
 function spawnConfetti(x, y) {
   for (let i = 0; i < 30; i++) {
@@ -496,8 +617,18 @@ function updateWinSequence() {
   if (winSequenceTimer % 20 === 0) spawnConfetti(player.x + player.w / 2, player.y - 10);
   winSequenceTimer--;
   if (winSequenceTimer <= 0) {
-    state = 'win';
-    showOverlay('🎉 You Win!', 'win');
+    if (questStage === 'item_collected') {
+      state = 'resolution'; // keeps the victory pose while Grandma Amina's closing lines play
+      showDialogue(CH1_RESOLUTION, () => {
+        questStage = 'complete';
+        updateQuestTracker();
+        state = 'win';
+        showOverlay('🎉 Kindness Star Earned!', 'win');
+      });
+    } else {
+      state = 'win';
+      showOverlay('🎉 You Win!', 'win');
+    }
   }
 }
 
@@ -551,6 +682,7 @@ function updatePlayer() {
           e.alive = false;
           playSound('stomp');
           spawnBurst(e.x + e.w / 2, e.y + e.h / 2);
+          onEnemyDefeated(e);
         }
       }
     }
@@ -595,6 +727,15 @@ function updatePlayer() {
     hurtPlayer(true);
   }
 
+  // quest: pick up Grandma's pot
+  if (questStage === 'started' && Math.abs((player.x + player.w / 2) - POT_X) < 24 && player.y + player.h > GROUND_Y - 60) {
+    questStage = 'item_collected';
+    updateQuestTracker();
+    playSound('attack');
+    spawnBurst(POT_X, GROUND_Y - 40, '255,210,120');
+    showToast("🍲 Picked up Grandma's Pot!");
+  }
+
   // camera follows player, clamped to level bounds
   camX = player.x - VIEW_WIDTH / 3;
   camX = Math.max(0, Math.min(camX, LEVEL_WIDTH - VIEW_WIDTH));
@@ -636,6 +777,53 @@ function showOverlay(text, kind) {
   overlay.style.display = 'flex';
 }
 
+// NPC dialogue: a queue of {name, portrait, text} lines shown one at a time in a
+// bottom-anchored textbox. The caller sets/restores `state` around this - showDialogue
+// itself doesn't touch game state, so it can be used both at the intro (state stays
+// 'intro') and after winning (state becomes 'resolution') without special-casing here.
+let dialogueQueue = [];
+let dialogueOnComplete = null;
+function showDialogue(lines, onComplete) {
+  dialogueQueue = lines.slice();
+  dialogueOnComplete = onComplete || null;
+  advanceDialogue();
+}
+function advanceDialogue() {
+  if (dialogueQueue.length === 0) {
+    document.getElementById('dialogue').classList.add('hidden');
+    const cb = dialogueOnComplete;
+    dialogueOnComplete = null;
+    if (cb) cb();
+    return;
+  }
+  const line = dialogueQueue.shift();
+  document.getElementById('dialoguePortrait').textContent = line.portrait || '';
+  document.getElementById('dialogueName').textContent = line.name || '';
+  document.getElementById('dialogueText').textContent = line.text;
+  document.getElementById('dialogue').classList.remove('hidden');
+}
+document.getElementById('dialogueContinueBtn').addEventListener('click', advanceDialogue);
+
+// lightweight non-blocking toast for small flavor moments (item pickups, un-grumped
+// enemies) that shouldn't pause the game the way a full dialogue does
+let toastText = '';
+let toastTimer = 0;
+function showToast(text) {
+  toastText = text;
+  toastTimer = 150; // ~2.5s at 60fps
+}
+function renderToast() {
+  const el = document.getElementById('toast');
+  if (toastTimer > 0) {
+    toastTimer--;
+    el.textContent = toastText;
+    el.style.display = 'block';
+    el.style.opacity = toastTimer < 30 ? Math.max(0, toastTimer / 30) : 1;
+  } else {
+    el.style.display = 'none';
+  }
+}
+
 const livesDisplayEl = document.getElementById('livesDisplay');
 const attackDisplayEl = document.getElementById('attackDisplay');
 function renderHud() {
@@ -656,6 +844,7 @@ function updateEnemies() {
         e.alive = false;
         player.vy = -8; // bounce off stomped enemy
         playSound('stomp');
+        onEnemyDefeated(e);
       } else {
         hurtPlayer(false);
       }
@@ -783,6 +972,9 @@ function draw() {
     ctx.drawImage(img, d.x, GROUND_Y - h + 6, w, h);
   }
 
+  drawGrandmaAmina();
+  drawPot();
+
   // platforms (only draw down to the visible viewport, not the full fill depth)
   for (const p of platforms) {
     const img = p.deco === 'block' ? sprites.questionBlock : sprites.ground;
@@ -808,7 +1000,7 @@ function draw() {
   // player: pick a pose sprite for the current state, drawn bottom-anchored on the
   // physics hitbox and scaled to CHAR_DISPLAY_HEIGHT (preserving the art's own aspect ratio)
   let poseImg;
-  if (state === 'win' || state === 'winSequence') poseImg = charSprites.victory;
+  if (state === 'win' || state === 'winSequence' || state === 'resolution') poseImg = charSprites.victory;
   else if (player.hurtTimer > 0) poseImg = charSprites.hurt;
   else if (player.attackTimer > 0) poseImg = charSprites.attack;
   else if (!player.onGround) poseImg = player.jumpsUsed >= 2 ? charSprites.doubleJump : charSprites.jump;
@@ -871,6 +1063,7 @@ function draw() {
 }
 
 function loop() {
+  frameCount++;
   if (state === 'playing') {
     updatePlayer();
     updateEnemies();
@@ -880,6 +1073,7 @@ function loop() {
   // over) instead of freezing mid-flight wherever they happened to be at that instant
   updateParticles();
   renderHud();
+  renderToast();
   draw();
   requestAnimationFrame(loop);
 }
