@@ -36,6 +36,13 @@
     font: bold clamp(12px, 3vw, 15px) monospace; padding: 8px 16px; border-radius: 8px;
     z-index: 15; pointer-events: none; display: none; text-align: center; max-width: 80vw;
   }
+  #chapterBanner {
+    position: fixed; top: 40%; left: 50%; transform: translate(-50%, -50%);
+    background: rgba(20,30,50,0.9); color: #ffd54a; text-shadow: 2px 2px #000;
+    border: 3px solid #ffd54a; box-shadow: 0 0 26px rgba(255,213,74,0.6);
+    font: bold clamp(16px, 4.4vw, 24px) monospace; padding: 14px 28px; border-radius: 12px;
+    z-index: 16; pointer-events: none; display: none; text-align: center; max-width: 85vw;
+  }
   #fsBtn {
     position: fixed; top: max(10px, env(safe-area-inset-top)); right: max(16px, env(safe-area-inset-right));
     font: bold clamp(12px, 2.6vw, 14px) monospace; padding: 6px 10px; cursor: pointer;
@@ -171,6 +178,7 @@
   <div id="questTracker"></div>
 </div>
 <div id="toast"></div>
+<div id="chapterBanner"></div>
 <button id="fsBtn">⛶ Fullscreen</button>
 <div id="zoomControls">
   <button id="zoomOutBtn" class="zoomBtn">−</button>
@@ -367,95 +375,242 @@ const MAX_ATTACK_CHARGES = 3;     // attacks in the "stock" before you have to w
 const ATTACK_RECHARGE_TIME = 300; // frames (~5s at 60fps) for one spent charge to come back
 const TILE = 30; // on-screen size for ground/block tiles
 
-// decorative trees & bushes along the level (purely visual, no collision) -
-// each one kept well inside its platform's span so it never floats over a gap
-const decorations = [
-  { type: 'tree', x: 150 },  { type: 'bush', x: 260 },  { type: 'tree', x: 400 },
-  { type: 'tree', x: 640 },  { type: 'bush', x: 720 },
-  { type: 'tree', x: 950 },  { type: 'bush', x: 1030 },
-  { type: 'tree', x: 1250 }, { type: 'tree', x: 1400 }, { type: 'bush', x: 1550 },
-  { type: 'tree', x: 1850 }, { type: 'bush', x: 2000 }, { type: 'tree', x: 2150 }, { type: 'bush', x: 2300 },
-];
-
 // ---- Level layout ----
-// platforms: static rectangles the player and enemies can stand on.
-// Gaps are 45 world-units wide; the jump physics below comfortably clear ~90+ units,
-// so gaps are crossable with generous timing margin instead of needing pixel-perfect jumps.
-const platforms = [
-  { x: 0,    y: GROUND_Y, w: 500, h: GROUND_DEPTH },
-  { x: 545,  y: GROUND_Y, w: 255, h: GROUND_DEPTH },
-  { x: 845,  y: GROUND_Y, w: 255, h: GROUND_DEPTH },
-  { x: 610,  y: GROUND_Y - 100, w: 120, h: 20, deco: 'block' },
-  { x: 1145, y: GROUND_Y, w: 505, h: GROUND_DEPTH },
-  { x: 1350, y: GROUND_Y - 80,  w: 100, h: 20, deco: 'block' },
-  { x: 1695, y: GROUND_Y, w: 905, h: GROUND_DEPTH },
-];
-const LEVEL_WIDTH = 2600;
-const FINISH_X = 2440;
+// The whole journey is ONE continuous scrolling level split into 6 story zones (see
+// STORY.md), one per chapter. Every zone repeats the exact same proven platform/gap
+// layout as the original single-chapter level (gaps sized to the tuned jump distance
+// below) so a new zone can never introduce an un-jumpable gap - only the decoration/enemy
+// dressing and the story beats differ per zone.
+const ZONE_WIDTH = 2600;
+const ZONE_COUNT = 6;
+const LEVEL_WIDTH = ZONE_WIDTH * ZONE_COUNT;
+const FINISH_X = (ZONE_COUNT - 1) * ZONE_WIDTH + 2440; // true end of the game, in the finale zone
 
-function makeEnemy(x, y, range, type) {
-  return { x, y, w: 28, h: 28, vx: 0.7, startX: x, range, alive: true, type, anim: 0 };
+function zonePlatforms(base) {
+  return [
+    { x: base + 0,    y: GROUND_Y, w: 500, h: GROUND_DEPTH },
+    { x: base + 545,  y: GROUND_Y, w: 255, h: GROUND_DEPTH },
+    { x: base + 845,  y: GROUND_Y, w: 255, h: GROUND_DEPTH },
+    { x: base + 610,  y: GROUND_Y - 100, w: 120, h: 20, deco: 'block' },
+    { x: base + 1145, y: GROUND_Y, w: 505, h: GROUND_DEPTH },
+    { x: base + 1350, y: GROUND_Y - 80,  w: 100, h: 20, deco: 'block' },
+    { x: base + 1695, y: GROUND_Y, w: 905, h: GROUND_DEPTH },
+  ];
 }
-const enemies = [
-  makeEnemy(250, GROUND_Y - 28, 150, 'goomba'),
-  makeEnemy(670, GROUND_Y - 28, 90, 'goomba'),
-  makeEnemy(970, GROUND_Y - 28, 110, 'turtle'),
-  makeEnemy(1400, GROUND_Y - 28, 180, 'goomba'),
-  makeEnemy(2100, GROUND_Y - 28, 200, 'turtle'),
+function zoneDecorations(base) {
+  return [
+    { type: 'tree', x: base + 150 },  { type: 'bush', x: base + 260 },  { type: 'tree', x: base + 400 },
+    { type: 'tree', x: base + 640 },  { type: 'bush', x: base + 720 },
+    { type: 'tree', x: base + 950 },  { type: 'bush', x: base + 1030 },
+    { type: 'tree', x: base + 1250 }, { type: 'tree', x: base + 1400 }, { type: 'bush', x: base + 1550 },
+    { type: 'tree', x: base + 1850 }, { type: 'bush', x: base + 2000 }, { type: 'tree', x: base + 2150 }, { type: 'bush', x: base + 2300 },
+  ];
+}
+const platforms = [];
+const decorations = [];
+for (let z = 0; z < ZONE_COUNT; z++) {
+  platforms.push(...zonePlatforms(z * ZONE_WIDTH));
+  decorations.push(...zoneDecorations(z * ZONE_WIDTH));
+}
+
+function makeEnemy(x, y, range, type, opts = {}) {
+  const w = opts.w || 28, h = opts.h || 28;
+  return { x, y: y - (h - 28), w, h, vx: 0.7, startX: x, range, alive: true, type, anim: 0, hp: opts.hp || 1, big: !!opts.big };
+}
+function addZoneEnemies(base, specs) {
+  for (const [dx, range, type, opts] of specs) enemies.push(makeEnemy(base + dx, GROUND_Y - 28, range, type, opts));
+}
+const STANDARD_ZONE_ENEMIES = [
+  [250, 150, 'goomba'], [670, 90, 'goomba'], [970, 110, 'turtle'], [1400, 180, 'goomba'], [2100, 200, 'turtle'],
+];
+const enemies = [];
+addZoneEnemies(0 * ZONE_WIDTH, STANDARD_ZONE_ENEMIES); // ch1 Kindness
+addZoneEnemies(1 * ZONE_WIDTH, STANDARD_ZONE_ENEMIES); // ch2 Honesty
+addZoneEnemies(2 * ZONE_WIDTH, STANDARD_ZONE_ENEMIES); // ch3 Sharing
+addZoneEnemies(3 * ZONE_WIDTH, [[670, 90, 'goomba'], [1400, 180, 'turtle']]); // ch4 Patience - calmer, fewer enemies
+addZoneEnemies(4 * ZONE_WIDTH, [
+  [250, 150, 'goomba'], [970, 110, 'turtle'], [1400, 180, 'goomba'], [2100, 200, 'turtle'],
+  [670, 60, 'goomba', { hp: 2, big: true, w: 40, h: 40 }], // the Big Grumblet bully (Chapter 5)
+]); // ch5 Courage
+addZoneEnemies(5 * ZONE_WIDTH, [
+  [200, 150, 'goomba'], [600, 100, 'turtle'], [970, 110, 'goomba'], [1400, 150, 'turtle'], [1700, 120, 'goomba'], [2100, 200, 'turtle'],
+]); // ch6 Finale - the hardest zone
+
+// ---- Story chapters engine (see STORY.md for the full script) ----
+// Every chapter lives in its own zone. Reaching a zone's end (with its quest item
+// collected, if it has one) plays the resolution dialogue, a "star earned" banner, then
+// chains straight into the next chapter's setup dialogue - the player never leaves
+// 'playing' state or sees a Restart screen until the true finale in chapter 6.
+const CHAPTERS = [
+  { // Chapter 1 - Kindness
+    starName: 'Kindness Star',
+    npc: { x: 0 * ZONE_WIDTH + 80, emoji: '👵', hasHut: true },
+    item: { x: 0 * ZONE_WIDTH + 2350, emoji: '🍲', pickupText: "🍲 Picked up Grandma's Pot!",
+      questText: "Find Grandma's cooking pot!", questTextAfter: 'Bring the pot back to Grandma Amina!' },
+    zoneEndX: 0 * ZONE_WIDTH + 2440,
+    setup: [
+      { name: 'Grandma Amina', portrait: '👵', text: "Oh dear! The wind blew my favorite cooking pot down the hill, right past the old bridge! I can't run after it — my knees aren't what they used to be." },
+      { name: 'Grandma Amina', portrait: '👵', text: 'Could a brave girl like you fetch it for me?' },
+    ],
+    resolution: [
+      { name: 'Grandma Amina', portrait: '👵', text: "You found it! You didn't have to do that, you know." },
+      { name: 'Grandma Amina', portrait: '👵', text: "But you did anyway. That's what kindness looks like, Qaila. Thank you." },
+    ],
+  },
+  { // Chapter 2 - Honesty
+    starName: 'Honesty Star',
+    npc: { x: 1 * ZONE_WIDTH + 2350, emoji: '🧔', hasStall: true },
+    item: { x: 1 * ZONE_WIDTH + 300, emoji: '👛', pickupText: '👛 Picked up a coin purse!',
+      questText: 'Find whoever dropped this coin purse!', questTextAfter: 'Return the coin purse at the marketplace!' },
+    zoneEndX: 1 * ZONE_WIDTH + 2440,
+    flavorPoint: { x: 1 * ZONE_WIDTH + 1300, shown: false,
+      text: '🪁 "That windup bird is so pretty... but these coins aren\'t mine. I should find their owner first."' },
+    setup: [
+      { name: 'Qaila', portrait: '🤔', text: "Wait, what's this? A heavy coin purse, just lying here..." },
+      { name: 'Qaila', portrait: '🤔', text: 'I should find whoever dropped it.' },
+    ],
+    resolution: [
+      { name: 'Uncle Farid', portrait: '🧔', text: "My coin purse! I dropped it on the hill this morning, I've been searching everywhere! You... you could have kept it. Why didn't you?" },
+      { name: 'Qaila', portrait: '😊', text: "Because it wasn't mine. That wouldn't be honest." },
+      { name: 'Uncle Farid', portrait: '🧔', text: "Well, since you're honest AND kind — here, take this windup bird. You've earned it fair and square." },
+    ],
+  },
+  { // Chapter 3 - Sharing
+    starName: 'Sharing Star',
+    npc: { x: 2 * ZONE_WIDTH + 2350, emoji: '🐢', hasHut: false },
+    item: { x: 2 * ZONE_WIDTH + 500, emoji: '🧺', pickupText: '🧺 Picked up a basket of apples!',
+      questText: 'Look for a snack along the path!', questTextAfter: 'Share your apples with anyone who needs them!' },
+    zoneEndX: 2 * ZONE_WIDTH + 2440,
+    setup: [
+      { name: 'Qaila', portrait: '😊', text: "Onward! Let's see who could use a hand today." },
+    ],
+    resolution: [
+      { name: 'Mama Shy-Shell', portrait: '🐢', text: "We haven't eaten since yesterday... my little one is so hungry." },
+      { name: 'Qaila', portrait: '😊', text: 'Here — please, take some apples!' },
+      { name: 'Mama Shy-Shell', portrait: '🐢', text: "Nobody's ever shared with us before. Thank you — sharing tastes even better than apples." },
+    ],
+  },
+  { // Chapter 4 - Patience
+    starName: 'Patience Star',
+    npc: { x: 3 * ZONE_WIDTH + 80, emoji: '🐌', hasHut: false },
+    item: null,
+    zoneEndX: 3 * ZONE_WIDTH + 2440,
+    setup: [
+      { name: 'Tuti', portrait: '🐌', text: 'I—I can\'t cross! What if I fall?' },
+      { name: 'Qaila', portrait: '😊', text: "Take your time, Tuti. I'm not going anywhere without you." },
+    ],
+    resolution: [
+      { name: 'Tuti', portrait: '🐌', text: 'We... we made it! I did it!' },
+      { name: "Tuti's Mama", portrait: '🐢', text: 'Oh, thank goodness! Thank you for taking such good care of my Tuti.' },
+    ],
+  },
+  { // Chapter 5 - Courage
+    starName: 'Courage Star',
+    npc: { x: 4 * ZONE_WIDTH + 80, emoji: '😢', hasHut: false },
+    item: null,
+    zoneEndX: 4 * ZONE_WIDTH + 2440,
+    resolutionRequiresAction: true, // only defeating the Big Grumblet grants this star - see onEnemyDefeated
+    setup: [
+      { name: 'Small Grumblet', portrait: '😢', text: "P-please don't take my snack..." },
+      { name: 'Qaila', portrait: '😠', text: 'Hey! Leave him alone!' },
+    ],
+    resolution: [
+      { name: 'Big Grumblet', portrait: '👹', text: "I... I don't know why I do that. I guess I wanted to feel big too. I'm sorry." },
+      { name: 'Small Grumblet', portrait: '😊', text: "You're forgiven. Wanna be friends instead?" },
+      { name: 'Qaila', portrait: '😊', text: 'Being brave doesn\'t mean being mean. It means standing up for someone.' },
+    ],
+  },
+  { // Chapter 6 - Forgiveness (Finale) - resolution is handled specially in updateWinSequence()
+    starName: 'Forgiveness Star',
+    npc: { x: FINISH_X - 40, emoji: '😾', bigEmoji: true },
+    item: null,
+    zoneEndX: FINISH_X,
+    setup: [
+      { name: 'Grandma Amina', portrait: '👵', text: 'Be careful, Qaila. Nobody has ever gotten close to The Grouch and come back the same.' },
+      { name: 'Uncle Farid', portrait: '🧔', text: "But if anyone can do it... it's you." },
+    ],
+  },
 ];
 
-// ---- Chapter 1 quest: "Grandma Amina's Kitchen" (see STORY.md) ----
-const GRANDMA_X = 80; // between player spawn (x:40) and the first tree decoration (x:150)
-const POT_X = 2350;
-let questStage = 'not_started'; // not_started | started | item_collected | complete
+let currentChapterIdx = 0;
+let chapterStage = 'not_started'; // not_started | started | item_collected | complete
 let firstEnemyDefeated = false;
-
-const CH1_SETUP = [
-  { name: 'Grandma Amina', portrait: '👵', text: "Oh dear! The wind blew my favorite cooking pot down the hill, right past the old bridge! I can't run after it — my knees aren't what they used to be." },
-  { name: 'Grandma Amina', portrait: '👵', text: 'Could a brave girl like you fetch it for me?' },
-];
-const CH1_RESOLUTION = [
-  { name: 'Grandma Amina', portrait: '👵', text: "You found it! You didn't have to do that, you know." },
-  { name: 'Grandma Amina', portrait: '👵', text: "But you did anyway. That's what kindness looks like, Qaila. Thank you." },
-];
+let earnedStars = [];
+function currentChapter() { return CHAPTERS[currentChapterIdx]; }
 
 function updateQuestTracker() {
   const el = document.getElementById('questTracker');
-  if (questStage === 'started') el.textContent = "Quest: Find Grandma's cooking pot!";
-  else if (questStage === 'item_collected') el.textContent = 'Quest: Bring the pot back to Grandma Amina!';
+  const ch = currentChapter();
+  if (chapterStage === 'started') el.textContent = 'Quest: ' + (ch.item ? ch.item.questText : (ch.questText || 'Find out what to do next.'));
+  else if (chapterStage === 'item_collected' && ch.item) el.textContent = 'Quest: ' + ch.item.questTextAfter;
   else el.textContent = '';
 }
 
-// Grandma Amina and the quest pot are drawn as simple emoji + flat shapes rather than new
-// sprite sheets - keeps this quest shippable without a new art pipeline; easy to swap for
-// real art later since both are self-contained draw functions.
-function drawGrandmaAmina() {
-  const x = GRANDMA_X;
-  // small hut for context, drawn to the left; Grandma herself stands clear of it
-  // to the right so her emoji doesn't overlap the hut's walls
-  ctx.fillStyle = '#c97b3d';
-  ctx.fillRect(x - 14, GROUND_Y - 46, 50, 46);
-  ctx.fillStyle = '#8b4a2b';
-  ctx.beginPath();
-  ctx.moveTo(x - 22, GROUND_Y - 46);
-  ctx.lineTo(x + 11, GROUND_Y - 74);
-  ctx.lineTo(x + 44, GROUND_Y - 46);
-  ctx.closePath();
-  ctx.fill();
-  ctx.font = '30px sans-serif';
+function startChapter(idx) {
+  currentChapterIdx = idx;
+  chapterStage = 'not_started';
+  state = 'intro'; // pause gameplay while the setup dialogue plays
+  showDialogue(CHAPTERS[idx].setup, () => {
+    chapterStage = 'started';
+    updateQuestTracker();
+    state = 'playing';
+  });
+}
+
+// resolves the current (non-finale) chapter: resolution dialogue -> star banner -> next chapter's setup
+function completeChapter() {
+  const ch = currentChapter();
+  chapterStage = 'complete';
+  state = 'resolution'; // pause gameplay for the resolution dialogue + star banner
+  showDialogue(ch.resolution, () => {
+    earnedStars.push(ch.starName);
+    updateQuestTracker();
+    showChapterBanner(`⭐ ${ch.starName} earned!`, () => {
+      const nextIdx = currentChapterIdx + 1;
+      if (nextIdx < CHAPTERS.length) startChapter(nextIdx);
+    });
+  });
+}
+
+// Chapter NPCs, quest items, and the small grumblets are all drawn as simple emoji + flat
+// shapes rather than new sprite sheets - keeps six chapters shippable without a new art
+// pipeline; easy to swap any of them for real art later since each is self-contained.
+function drawChapterNpc(ch) {
+  if (!ch.npc) return;
+  const x = ch.npc.x;
+  let labelOffset = 0;
+  if (ch.npc.hasHut) {
+    ctx.fillStyle = '#c97b3d';
+    ctx.fillRect(x - 14, GROUND_Y - 46, 50, 46);
+    ctx.fillStyle = '#8b4a2b';
+    ctx.beginPath();
+    ctx.moveTo(x - 22, GROUND_Y - 46);
+    ctx.lineTo(x + 11, GROUND_Y - 74);
+    ctx.lineTo(x + 44, GROUND_Y - 46);
+    ctx.closePath();
+    ctx.fill();
+    labelOffset = 48;
+  } else if (ch.npc.hasStall) {
+    ctx.fillStyle = '#8b5a2b';
+    ctx.fillRect(x - 10, GROUND_Y - 34, 56, 6);
+    ctx.fillRect(x - 8, GROUND_Y - 34, 6, 34);
+    ctx.fillRect(x + 40, GROUND_Y - 34, 6, 34);
+    labelOffset = 60;
+  }
+  ctx.font = (ch.npc.bigEmoji ? '52px' : '30px') + ' sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillText('👵', x + 48, GROUND_Y);
+  ctx.fillText(ch.npc.emoji, x + labelOffset, GROUND_Y);
   ctx.textAlign = 'left';
 }
 
-function drawPot() {
-  if (questStage !== 'started') return;
+function drawChapterItem(ch) {
+  if (!ch.item || ch !== currentChapter() || chapterStage !== 'started') return;
   const bobY = GROUND_Y - 44 + Math.sin(frameCount * 0.08) * 4;
   ctx.font = '26px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('🍲', POT_X, bobY);
+  ctx.fillText(ch.item.emoji, ch.item.x, bobY);
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
 }
@@ -517,12 +672,8 @@ document.getElementById('legendCloseBtn').addEventListener('click', () => {
   legend.classList.add('hidden');
   document.body.classList.remove('legendOpen');
   if (state === 'intro') {
-    if (questStage === 'not_started') {
-      showDialogue(CH1_SETUP, () => {
-        questStage = 'started';
-        updateQuestTracker();
-        state = 'playing';
-      });
+    if (currentChapterIdx === 0 && chapterStage === 'not_started') {
+      startChapter(0);
     } else {
       state = 'playing';
     }
@@ -579,10 +730,15 @@ function spawnBurst(x, y, color = '255,220,120') {
 }
 // first enemy "un-grumped" gets a one-time flavor toast tying the mechanic back to the story
 function onEnemyDefeated(e) {
-  if (firstEnemyDefeated) return;
-  firstEnemyDefeated = true;
-  const name = e.type === 'goomba' ? 'Grumblet' : 'Shy-Shell';
-  showToast(`✨ ${name}: "...wait, why do I feel like giggling? Thanks!"`);
+  if (!firstEnemyDefeated) {
+    firstEnemyDefeated = true;
+    const name = e.type === 'goomba' ? 'Grumblet' : 'Shy-Shell';
+    showToast(`✨ ${name}: "...wait, why do I feel like giggling? Thanks!"`);
+  }
+  // Chapter 5 (Courage): defeating the Big Grumblet bully IS that chapter's resolution trigger
+  if (e.big && currentChapterIdx === 4 && chapterStage === 'started') {
+    completeChapter();
+  }
 }
 const CONFETTI_COLORS = ['255,200,60', '255,120,120', '120,200,255', '160,255,140', '255,255,255'];
 function spawnConfetti(x, y) {
@@ -604,10 +760,38 @@ function updateParticles() {
   }
 }
 
-// win sequence: touching the flag freezes gameplay and plays a short celebration
-// (flag climbing the pole + confetti bursts) before the "You Win!" overlay appears
+// ---- Chapter 6 finale script (see STORY.md) ----
+// The "Five Stars" beat references whichever stars were actually earned, so a player who
+// missed one (e.g. skipped the Chapter 5 fight) still gets a coherent scene.
+const FINALE_CONFRONTATION = [
+  { name: 'The Grouch', portrait: '😾', text: 'ANOTHER one, come to chase me away? Go ahead. Everyone always does.' },
+  { name: 'Qaila', portrait: '😊', text: "I'm not here to chase you away." },
+  { name: 'The Grouch', portrait: '😾', text: '...what?' },
+];
+const STAR_MEMORY_LINES = {
+  'Kindness Star': "Remember Grandma Amina's pot...",
+  'Honesty Star': "...and Uncle Farid's coin purse...",
+  'Sharing Star': '...and the apples we shared...',
+  'Patience Star': '...and waiting for Tuti...',
+  'Courage Star': '...and standing up for a friend.',
+};
+const FINALE_TURNING_POINT = [
+  { name: 'Qaila', portrait: '😊', text: "Every single time, I could have walked away. I didn't. And I'm not walking away from you either." },
+  { name: 'The Grouch', portrait: '😾', text: "Nobody... nobody ever tried to understand me before. They just ran away. You didn't." },
+  { name: 'Qaila', portrait: '😊', text: "That's what kindness is for. It's for everyone — even you." },
+  { name: 'The Grouch', portrait: '🥹', text: "I... I don't know how to be anything else. Will you teach me?" },
+  { name: 'Qaila', portrait: '😊', text: "That's easy. Just start with one small kind thing. I'll help." },
+];
+const FINALE_EPILOGUE = [
+  { name: 'Grandma Amina', portrait: '👵', text: "Well, I never thought I'd see the day The Grouch would smile." },
+  { name: 'Glim (formerly The Grouch)', portrait: '😊', text: 'Me neither.' },
+  { name: 'Qaila', portrait: '😊', text: 'See? A little kindness goes a long way.' },
+];
+
+// win sequence: touching the true finish flag freezes gameplay and plays a short
+// celebration (flag climbing the pole + confetti bursts) before the finale dialogue
 const FLAG_RAISE_DURATION = 50; // frames for the banner to climb to the top of the pole
-const WIN_SEQUENCE_DURATION = 100; // frames before the overlay shows, so there's time to enjoy it
+const WIN_SEQUENCE_DURATION = 100; // frames before the dialogue shows, so there's time to enjoy it
 let winSequenceTimer = 0;
 let flagRaiseProgress = 0; // 0 = resting low on the pole, 1 = fully raised
 function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
@@ -617,18 +801,13 @@ function updateWinSequence() {
   if (winSequenceTimer % 20 === 0) spawnConfetti(player.x + player.w / 2, player.y - 10);
   winSequenceTimer--;
   if (winSequenceTimer <= 0) {
-    if (questStage === 'item_collected') {
-      state = 'resolution'; // keeps the victory pose while Grandma Amina's closing lines play
-      showDialogue(CH1_RESOLUTION, () => {
-        questStage = 'complete';
-        updateQuestTracker();
-        state = 'win';
-        showOverlay('🎉 Kindness Star Earned!', 'win');
-      });
-    } else {
+    state = 'resolution'; // keeps the victory pose while the finale dialogue plays
+    const starLines = earnedStars.map(name => ({ name: 'Qaila', portrait: '⭐', text: STAR_MEMORY_LINES[name] || '' }));
+    const script = [...FINALE_CONFRONTATION, ...starLines, ...FINALE_TURNING_POINT, ...FINALE_EPILOGUE];
+    showDialogue(script, () => {
       state = 'win';
-      showOverlay('🎉 You Win!', 'win');
-    }
+      showOverlay('🎉 Story Complete! All Kindness Stars Earned!', 'win');
+    });
   }
 }
 
@@ -679,10 +858,13 @@ function updatePlayer() {
       };
       for (const e of enemies) {
         if (e.alive && rectsOverlap(hitbox, e)) {
-          e.alive = false;
+          e.hp--;
           playSound('stomp');
           spawnBurst(e.x + e.w / 2, e.y + e.h / 2);
-          onEnemyDefeated(e);
+          if (e.hp <= 0) {
+            e.alive = false;
+            onEnemyDefeated(e);
+          }
         }
       }
     }
@@ -727,20 +909,37 @@ function updatePlayer() {
     hurtPlayer(true);
   }
 
-  // quest: pick up Grandma's pot
-  if (questStage === 'started' && Math.abs((player.x + player.w / 2) - POT_X) < 24 && player.y + player.h > GROUND_Y - 60) {
-    questStage = 'item_collected';
-    updateQuestTracker();
-    playSound('attack');
-    spawnBurst(POT_X, GROUND_Y - 40, '255,210,120');
-    showToast("🍲 Picked up Grandma's Pot!");
+  // quest: current chapter's item pickup, one-time flavor toast, and zone-end trigger
+  {
+    const ch = currentChapter();
+    if (ch.item && chapterStage === 'started' &&
+        Math.abs((player.x + player.w / 2) - ch.item.x) < 24 && player.y + player.h > GROUND_Y - 60) {
+      chapterStage = 'item_collected';
+      updateQuestTracker();
+      playSound('attack');
+      spawnBurst(ch.item.x, GROUND_Y - 40, '255,210,120');
+      showToast(ch.item.pickupText);
+    }
+    if (ch.flavorPoint && !ch.flavorPoint.shown && chapterStage !== 'not_started' &&
+        Math.abs((player.x + player.w / 2) - ch.flavorPoint.x) < 30) {
+      ch.flavorPoint.shown = true;
+      showToast(ch.flavorPoint.text);
+    }
+    // chapters 1-5 chain automatically at their zone's end; the finale (last chapter) is
+    // handled below via the true finish flag instead, since there's no chapter after it
+    if (currentChapterIdx < CHAPTERS.length - 1 && chapterStage !== 'complete' && player.x >= ch.zoneEndX) {
+      const ready = ch.resolutionRequiresAction ? false : (ch.item ? chapterStage === 'item_collected' : chapterStage === 'started');
+      if (ready) completeChapter();
+      else startChapter(currentChapterIdx + 1); // missed this chapter's star, but the story moves on
+    }
   }
 
   // camera follows player, clamped to level bounds
   camX = player.x - VIEW_WIDTH / 3;
   camX = Math.max(0, Math.min(camX, LEVEL_WIDTH - VIEW_WIDTH));
 
-  // reached the finish line - freeze gameplay and celebrate before showing the overlay
+  // reached the true finish line (end of chapter 6) - freeze gameplay and celebrate
+  // before the finale dialogue and final overlay
   if (player.x >= FINISH_X) {
     state = 'winSequence';
     playSound('win');
@@ -824,6 +1023,29 @@ function renderToast() {
   }
 }
 
+// bigger, timed "chapter complete" celebration banner - unlike showDialogue this needs no
+// input to dismiss; it just holds briefly, fires its callback, and clears itself
+let bannerTimer = 0;
+let bannerOnComplete = null;
+function showChapterBanner(text, onComplete) {
+  document.getElementById('chapterBanner').textContent = text;
+  bannerTimer = 110; // ~1.8s at 60fps
+  bannerOnComplete = onComplete || null;
+}
+function updateBanner() {
+  if (bannerTimer <= 0) return;
+  bannerTimer--;
+  if (bannerTimer <= 0) {
+    document.getElementById('chapterBanner').style.display = 'none';
+    const cb = bannerOnComplete;
+    bannerOnComplete = null;
+    if (cb) cb();
+  }
+}
+function renderBanner() {
+  if (bannerTimer > 0) document.getElementById('chapterBanner').style.display = 'block';
+}
+
 const livesDisplayEl = document.getElementById('livesDisplay');
 const attackDisplayEl = document.getElementById('attackDisplay');
 function renderHud() {
@@ -841,10 +1063,13 @@ function updateEnemies() {
     if (player.alive && rectsOverlap(player, e)) {
       const playerFalling = player.vy > 0 && (player.y + player.h) - e.y < 14;
       if (playerFalling) {
-        e.alive = false;
-        player.vy = -8; // bounce off stomped enemy
+        e.hp--;
+        player.vy = -8; // bounce off stomped enemy - always safe, even against a tougher enemy
         playSound('stomp');
-        onEnemyDefeated(e);
+        if (e.hp <= 0) {
+          e.alive = false;
+          onEnemyDefeated(e);
+        }
       } else {
         hurtPlayer(false);
       }
@@ -972,8 +1197,10 @@ function draw() {
     ctx.drawImage(img, d.x, GROUND_Y - h + 6, w, h);
   }
 
-  drawGrandmaAmina();
-  drawPot();
+  for (const ch of CHAPTERS) {
+    drawChapterNpc(ch);
+    drawChapterItem(ch);
+  }
 
   // platforms (only draw down to the visible viewport, not the full fill depth)
   for (const p of platforms) {
@@ -1069,11 +1296,13 @@ function loop() {
     updateEnemies();
   }
   updateWinSequence();
+  updateBanner();
   // particles (confetti, hit sparks) keep animating even after the game stops (e.g. on win/game
   // over) instead of freezing mid-flight wherever they happened to be at that instant
   updateParticles();
   renderHud();
   renderToast();
+  renderBanner();
   draw();
   requestAnimationFrame(loop);
 }
